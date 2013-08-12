@@ -120,7 +120,7 @@ let record ?decorate_with rule side_effects (embedding,fresh_map) event_number g
 	in
 	grid
 
-let record_obs ((r_id,state,embedding,_),test) event_number grid env = 
+let record_obs side_effects ((r_id,state,embedding,_),test) event_number grid env = 
   let im embedding id =
     match id with
       | FRESH j -> raise (Invalid_argument "Causal.record_obs")
@@ -136,6 +136,13 @@ let record_obs ((r_id,state,embedding,_),test) event_number grid env =
       ) 
       causal  
       grid
+  in
+  let grid =  
+    (*adding side effects modifications*)
+    Int2Set.fold 
+      (fun (node_id,site_id) grid -> 
+        add (node_id,site_id) (_LINK_TESTED lor _LINK_MODIF) grid event_number (OBS r_id) [])
+      side_effects grid
   in
   grid
 
@@ -252,18 +259,22 @@ let ids_of_grid grid = Hashtbl.fold (fun key _ l -> key::l) grid.flow []
 let config_of_grid = cut 
 
 let prec_star_of_config config = 
-  let rec prec_closure config todo closure =
+  let rec prec_closure config todo already_done closure =
     if IntSet.is_empty todo then closure
     else
       let eid = IntSet.choose todo in
       let todo' = IntSet.remove eid todo in
-      let prec = try IntMap.find eid config.prec_1 with Not_found -> IntSet.empty
-      in
-      prec_closure config (IntSet.union todo' prec) (IntSet.union prec closure)
+      if IntSet.mem eid already_done 
+      then 
+        prec_closure config todo' already_done closure 
+      else 
+        let prec = try IntMap.find eid config.prec_1 with Not_found -> IntSet.empty
+        in
+      prec_closure config (IntSet.union todo' prec) (IntSet.add eid already_done) (IntSet.union prec closure)
   in
   IntMap.fold 
     (fun eid kind prec_star -> 
-      let set = prec_closure config (IntSet.singleton eid) IntSet.empty
+      let set = prec_closure config (IntSet.singleton eid) IntSet.empty IntSet.empty
       in
       IntMap.add eid set prec_star
     ) config.events IntMap.empty 

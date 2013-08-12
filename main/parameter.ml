@@ -55,8 +55,17 @@ let snapshotHighres = ref true
 
 let causalModeOn = ref false
 let weakCompression = ref false 
+let strongCompression = ref false 
 let mazCompression = ref false 
 let showIntroEvents = ref false
+
+(*XLS output for the grids during compression*)
+let dump_grid_before_weak_compression = false
+let dump_grid_before_strong_compression = false
+let dump_grid_after_branching_during_weak_compression = false
+let dump_grid_after_branching_during_strong_compression = false
+let xlsweakFileName = "grid_weak_compression"
+let xlsstrongFileName = "grid_strong_compression"
 
 (*Computed values*)
 let (timeIncrementValue:float option ref) = ref None
@@ -129,6 +138,7 @@ let (openInDescriptors:in_channel list ref) = ref []
 let add_out_desc d = openOutDescriptors := d::!openOutDescriptors  
 let add_in_desc d = openInDescriptors := d::!openInDescriptors  
 
+type current_compression_mode = Weak | Strong 
 type compression_mode = 
     { 
       causal_trace:bool;
@@ -140,7 +150,7 @@ let get_compression_mode () =
   {
     causal_trace=(!mazCompression);
     weak_compression=(!weakCompression);
-    strong_compression=false;
+    strong_compression=(!strongCompression);
   }
 
 let get_causal_trace x = x.causal_trace 
