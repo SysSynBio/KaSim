@@ -400,7 +400,12 @@ let rec partial_eval_alg env ast =
 		| SUM (ast, ast', pos) -> bin_op ast ast' pos (fun x y -> cast_op x y (fun a b -> a +. b) (Some (fun a b -> a+b)) (Some (fun a b -> Int64.add a b))) "+"
 		| MULT (ast, ast', pos) -> bin_op ast ast' pos  (fun x y -> cast_op x y (fun a b -> a *. b) (Some (fun a b -> a*b)) (Some (fun a b -> Int64.mul a b))) "*"
 		| MINUS (ast, ast', pos) -> bin_op ast ast' pos (fun x y -> cast_op x y (fun a b -> a -. b) (Some (fun a b -> a-b)) (Some (fun a b -> Int64.sub a b))) "-"
-		| POW (ast, ast', pos) -> bin_op ast ast' pos (fun x y -> cast_op x y (fun a b -> a ** b) (Some (fun a b -> Tools.pow a b)) (Some (fun a b -> Tools.pow64 a (Int64.to_int b)))) "^"
+		| POW (ast, ast', pos) -> 
+			bin_op ast ast' pos (fun x y -> cast_op x y (fun a b -> a ** b) (Some (fun a b -> Tools.pow a b)) (Some (fun a b -> Tools.pow64 a (Int64.to_int b)))) "^"
+		| MAX (ast, ast', pos) -> 
+			bin_op ast ast' pos (fun x y -> cast_op x y (fun a b -> max a b) (Some (fun a b -> max a b)) (Some (fun a b -> max a b))) "max" 
+		| MIN (ast,ast',pos) ->
+			bin_op ast ast' pos (fun x y -> cast_op x y (fun a b -> min a b) (Some (fun a b -> min a b)) (Some (fun a b -> min a b))) "min"
 		| MODULO (ast, ast', pos) -> 
 			bin_op ast ast' pos 
 			(fun x y -> 
@@ -918,9 +923,9 @@ let pert_of_result variables env res =
 						(Printf.sprintf "whenever %s, %s until %s" str_pre str_eff str_abort,Some (bv,dep,str_abort)) 
 				in
 				let env,p_id = Environment.declare_pert (str_pert,pos) env in
-				let env,effect_list =
+				let env,effect_list,_ =
 					List.fold_left 
-					(fun (env,rule_list) effect -> 
+					(fun (env,rule_list,cpt) effect -> 
 						match effect with
 						| Dynamics.INTRO (_,mix) ->
 							begin
@@ -934,7 +939,7 @@ let pert_of_result variables env res =
 								and kappa_lhs = ""
 								and kappa_rhs = Mixture.to_kappa false rhs env in
 								let r_id = Mixture.get_id lhs in
-								let str_pert = Printf.sprintf "pert_%d" p_id in
+								let str_pert = Printf.sprintf "pert_%d%d" p_id cpt in
 								let env = Environment.declare_rule (Some (str_pert,pos)) r_id env in
 								let env =
 									DepSet.fold
@@ -964,7 +969,7 @@ let pert_of_result variables env res =
 									Dynamics.cc_impact = None 
 								}
 								in
-								(env,(Some rule,effect)::rule_list)
+								(env,(Some rule,effect)::rule_list,cpt+1)
 							end
 						| Dynamics.DELETE (_,mix) ->
 							begin
@@ -975,7 +980,7 @@ let pert_of_result variables env res =
 								and kappa_lhs = Mixture.to_kappa false lhs env
 								and kappa_rhs = "" in
 								let r_id = Mixture.get_id lhs in
-								let str_pert = Printf.sprintf "pert_%d" p_id in
+								let str_pert = Printf.sprintf "pert_%d%d" p_id cpt in
 								let env = Environment.declare_rule (Some (str_pert,pos)) r_id env in
 								let env =
 									DepSet.fold
@@ -1005,7 +1010,7 @@ let pert_of_result variables env res =
 									Dynamics.cc_impact = None ;
 								}
 								in
-								(env,(Some rule,effect)::rule_list)
+								(env,(Some rule,effect)::rule_list,cpt+1)
 							end
 						| Dynamics.CFLOW _ ->
 							let env = {env with Environment.tracking_enabled = true} in
@@ -1015,15 +1020,15 @@ let pert_of_result variables env res =
 								)
 								dep env
 							in 
-							(env,(None,effect)::rule_list) 
+							(env,(None,effect)::rule_list,cpt) 
 						| Dynamics.UPDATE_RULE _ |Dynamics.UPDATE_VAR _ | Dynamics.UPDATE_TOK _ | Dynamics.SNAPSHOT _ | Dynamics.STOP _ | Dynamics.FLUX _ | Dynamics.FLUXOFF _ | Dynamics.CFLOWOFF _ | Dynamics.PRINT _ -> 
 							let env =
 								DepSet.fold
 								(fun dep env -> Environment.add_dependencies dep (Mods.PERT p_id) env
 								)
 								dep env
-							in (env,(None,effect)::rule_list) 
-				) (env,[]) effects
+							in (env,(None,effect)::rule_list,cpt) 
+				) (env,[],0) effects
 				in
 				(*let env = List.fold_left (fun env (r_opt,effect) -> Environment.bind_pert_rule p_id r.r_id env) env effect_list in *)
 				let opt,env =

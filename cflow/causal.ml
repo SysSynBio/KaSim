@@ -16,14 +16,27 @@ type atom =
 	}
 
 type attribute = atom list (*vertical sequence of atoms*)
-type grid = {flow: (int*int*int,attribute) Hashtbl.t}  (*(n_i,s_i,q_i) -> att_i with n_i: node_id, s_i: site_id, q_i: link (1) or internal state (0) *)
-type config = {events: atom IntMap.t ; prec_1: IntSet.t IntMap.t ; conflict : IntSet.t IntMap.t ; top : IntSet.t}
+type grid = 
+  {
+    flow: (int*int*int,attribute) Hashtbl.t ;  (*(n_i,s_i,q_i) -> att_i with n_i: node_id, s_i: site_id, q_i: link (1) or internal state (0) *)
+    pid_to_init: (int*int*int,int) Hashtbl.t ;
+    obs: int list ; 
+    weak_list: int list ; 
+    init_tbl: (int,Mods.IntSet.t) Hashtbl.t;(*decreasing*)
+    init_to_eidmax: (int,int) Hashtbl.t;
+  } 
+type config = 
+  {
+    events: atom IntMap.t ; 
+    prec_1: IntSet.t IntMap.t ; 
+    conflict : IntSet.t IntMap.t ; 
+    top : IntSet.t}
 type enriched_grid = 
     { 
       config:config;
       ids:(int * int * int) list ;
       depth:int;
-      prec_star: Mods.IntSet.t Mods.IntMap.t ;
+      prec_star: int list array ; (*decreasing*)
       depth_of_event: int Mods.IntMap.t ;
       size:int;
     }
@@ -31,15 +44,92 @@ type enriched_grid =
 let empty_config = {events=IntMap.empty ; conflict = IntMap.empty ; prec_1 = IntMap.empty ; top = IntSet.empty}
 let is i c = (i land c = i)
 
-let empty_grid () = {flow = Hashtbl.create !Parameter.defaultExtArraySize }
+let empty_grid () = 
+{
+  flow = Hashtbl.create !Parameter.defaultExtArraySize ; 
+  pid_to_init = Hashtbl.create !Parameter.defaultExtArraySize ; 
+  obs = [] ; 
+  weak_list = [];
+  init_tbl = Hashtbl.create !Parameter.defaultExtArraySize ; 
+  init_to_eidmax = Hashtbl.create !Parameter.defaultExtArraySize 
+}
+
+
+
+let build_subs l = 
+  snd 
+    (  List.fold_left 
+         (fun (n,map) a -> 
+           let n=n+1 in 
+           (n,IntMap.add a n map))
+         (0,IntMap.empty) 
+         l)
+
+let submap subs l m default = 
+  List.fold_left 
+    (fun m' a -> 
+      let new_a = IntMap.find a subs in 
+      IntMap.add new_a (
+      try 
+        IntMap.find a m
+      with 
+      | Not_found -> 
+        begin 
+          match default with None -> raise Not_found | Some a -> a
+        end 
+     ) m')
+    IntMap.empty l 
+
+let add_init_pid eid pid grid = 
+  let eid_init = Hashtbl.find grid.pid_to_init pid in 
+  let old = 
+    try
+      Hashtbl.find grid.init_tbl eid 
+    with 
+      Not_found -> Mods.IntSet.empty
+  in 
+  let _ = Hashtbl.replace grid.init_tbl eid (Mods.IntSet.add eid_init old) in 
+  let _ = Hashtbl.replace grid.init_to_eidmax eid_init eid in 
+  grid 
+
+let subset subs l s = 
+  List.fold_left 
+    (fun s' a -> if IntSet.mem a s then IntSet.add (IntMap.find a subs) s' else s')
+    IntSet.empty l 
+
+let subconfig_with_subs subs config l = 
+  {events = submap subs l config.events None ;
+   prec_1 = submap subs l config.prec_1 (Some IntSet.empty);
+   conflict = submap subs l config.conflict (Some IntSet.empty);
+   top = subset subs l config.top}
+let subenriched_grid_with_subs subs  grid l = 
+  let depth_of_event = submap subs  l grid.depth_of_event (Some 0) in 
+  let depth = IntMap.fold (fun _ -> max) depth_of_event 0 in 
+  {grid with 
+    config = subconfig_with_subs subs  grid.config l ;
+    depth_of_event = depth_of_event ;
+    depth = depth ;
+      size = List.length l ;
+  }
+
+let subconfig config l = subconfig_with_subs (build_subs l) config l 
+let subenriched_grid grid l = subenriched_grid_with_subs (build_subs l) grid l
+
+let add_obs_eid eid grid = {grid with obs = eid::(grid.obs)}
 
 let grid_find (node_id,site_id,quark) grid = Hashtbl.find grid.flow (node_id,site_id,quark)
 
 let is_empty_grid grid = (Hashtbl.length grid.flow = 0)
 
-let grid_add (node_id,site_id,quark) attribute grid = 
-	Hashtbl.replace grid.flow (node_id,site_id,quark) attribute ;
-	grid
+let grid_add quark eid (attribute:attribute) grid = 
+  let _ = 
+    try 
+      let _ = Hashtbl.find grid.flow quark in ()
+    with 
+    | _ -> Hashtbl.add grid.pid_to_init quark eid  
+  in 
+  Hashtbl.replace grid.flow quark attribute ;
+  grid
 		
 let impact q c = 
 	if q = 1 (*link*) 
@@ -68,41 +158,63 @@ let push (a:atom) (att:atom list) =
 				 
 
 let add (node_id,site_id) c grid event_number kind obs =
+  (* make  this function more compact *)
 	(*adding a link modification*)
 	let grid = 
 		if (is _LINK_TESTED c) || (is _LINK_MODIF c) then
 			let att = try grid_find (node_id,site_id,1) grid with Not_found -> [] in
 			let att = push {causal_impact = impact 1 c ; eid = event_number ; kind = kind (*; observation = obs*)} att
 			in
-			grid_add (node_id,site_id,1) att grid
+                        let grid = 
+			  grid_add (node_id,site_id,1) event_number att grid
+                        in 
+                        let grid = 
+                          add_init_pid event_number (node_id,site_id,1) grid 
+                        in 
+                        grid
 		else
 			grid 
 	in
 	if (is _INTERNAL_TESTED c) || (is _INTERNAL_MODIF c) then
-		(*adding an internal state modification*)
-		let att = try grid_find (node_id,site_id,0) grid with Not_found -> [] in
-		let att = push {causal_impact = impact 0 c ; eid = event_number ; kind = kind (*; observation = obs*)} att
-		in
-		grid_add (node_id,site_id,0) att grid
+	    (*adding an internal state modification*)
+	  let att = try grid_find (node_id,site_id,0) grid with Not_found -> [] in
+	  let att = push {causal_impact = impact 0 c ; eid = event_number ; kind = kind (*; observation = obs*)} att
+	  in
+          let grid = 
+	    grid_add (node_id,site_id,0) event_number att grid
+          in 
+           let grid = 
+            add_init_pid event_number (node_id,site_id,0) grid 
+          in 
+          grid 
 	else 
-		grid
-		
+	  grid
+
+          
 (**side_effect Int2Set.t: pairs (agents,ports) that have been freed as a side effect --via a DEL or a FREE action*)
 (*NB no internal state modif as side effect*)
-let record ?decorate_with rule side_effects (embedding,fresh_map) event_number grid env = 
+let store_is_weak is_weak eid grid = 
+  if is_weak 
+  then 
+    {grid 
+     with weak_list = eid::(grid.weak_list)}
+  else 
+    grid 
+
+let record ?decorate_with rule side_effects (embedding,fresh_map) is_weak event_number grid env = 
 	
 	let pre_causal = rule.Dynamics.pre_causal
 	and r_id = rule.Dynamics.r_id
 	and obs = match decorate_with with None -> [] | Some l -> (List.rev_map (fun (id,_) -> Environment.kappa_of_num id env) (List.rev l))
 	in
-	let kind = RULE r_id in
+  	let kind = RULE r_id in
 	
 	let im embedding fresh_map id =
 		match id with
 			| FRESH j -> IntMap.find j fresh_map
 			| KEPT j -> IntMap.find j embedding
 	in
-	
+        let grid = store_is_weak is_weak event_number grid in 
 	let grid =  
 		(*adding side-effect free modifications and tests*)
 		let grid = 
@@ -120,7 +232,9 @@ let record ?decorate_with rule side_effects (embedding,fresh_map) event_number g
 	in
 	grid
 
-let record_obs side_effects ((r_id,state,embedding,_),test) event_number grid env = 
+let record_obs side_effects ((r_id,state,embedding,_),test) is_weak event_number grid env = 
+  let grid = add_obs_eid event_number grid in 
+  let grid = store_is_weak is_weak event_number grid in 
   let im embedding id =
     match id with
       | FRESH j -> raise (Invalid_argument "Causal.record_obs")
@@ -146,12 +260,13 @@ let record_obs side_effects ((r_id,state,embedding,_),test) event_number grid en
   in
   grid
 
-let record_init init event_number grid env = 
-  if !Parameter.showIntroEvents  
-  then 
+let record_init init is_weak event_number grid env = 
+(*  if !Parameter.showIntroEvents  
+  then *)
     (*adding tests*)
     let (((node_id,agent_name),interface),_) = init in  
     let causal = Dynamics.compute_causal_init init env in 
+    let grid = store_is_weak is_weak event_number grid in 
     let grid = 
     Mods.Int2Map.fold 
       (fun (node_id,site_id) c grid -> 
@@ -161,8 +276,8 @@ let record_init init event_number grid env =
       ) causal grid 
     in
     grid
-  else 
-    grid 
+(*  else 
+    grid *)
 
 let add_pred eid atom config = 
 	let events = IntMap.add atom.eid atom config.events
@@ -258,7 +373,8 @@ let label env state e =
 let ids_of_grid grid = Hashtbl.fold (fun key _ l -> key::l) grid.flow []
 let config_of_grid = cut 
 
-let prec_star_of_config config = 
+
+(*let prec_star_of_config_old  config = 
   let rec prec_closure config todo already_done closure =
     if IntSet.is_empty todo then closure
     else
@@ -277,7 +393,11 @@ let prec_star_of_config config =
       let set = prec_closure config (IntSet.singleton eid) IntSet.empty IntSet.empty
       in
       IntMap.add eid set prec_star
-    ) config.events IntMap.empty 
+    ) config.events IntMap.empty *)
+
+let prec_star_of_config config_closure config to_keep init_to_eidmax weak_events init = 
+  let a = Graph_closure.closure config_closure config.prec_1 to_keep  init_to_eidmax weak_events init in 
+  Graph_closure.A.map fst a 
 
 let depth_and_size_of_event config =
   IntMap.fold 
@@ -294,10 +414,38 @@ let depth_and_size_of_event config =
     ) config.prec_1 (IntMap.empty,0,0)
 
 
-let enrich_grid grid = 
+let enrich_grid config_closure grid = 
+  let keep_l = List.fold_left (fun a b -> IntSet.add b a) IntSet.empty grid.obs in 
+  let to_keep = 
+    (fun i -> IntSet.mem i keep_l)
+  in 
   let ids = ids_of_grid grid  in 
   let config = config_of_grid ids grid in 
-  let prec_star = prec_star_of_config config in
+  let max_key = List.fold_left max 0 grid.weak_list  in 
+  let tbl = Graph_closure.A.create (max_key+1) false in 
+  let _ = 
+    List.iter 
+      (fun i -> Graph_closure.A.set tbl i true)
+      grid.weak_list 
+  in 
+  let weak_fun i = 
+    try 
+      Graph_closure.A.get tbl i 
+    with _ -> false 
+  in 
+  let init_fun i = 
+    try 
+      List.rev (Mods.IntSet.elements (Mods.IntSet.remove i (Hashtbl.find grid.init_tbl i)))
+    with 
+      _ -> []
+  in 
+  let init_to_eid_max i = 
+    try 
+      Hashtbl.find grid.init_to_eidmax i
+    with 
+      Not_found -> 0 
+  in 
+  let prec_star= prec_star_of_config config_closure config to_keep init_to_eid_max weak_fun init_fun in
   let depth_of_event,size,depth = depth_and_size_of_event config in  
   { 
     config = config ; 
@@ -339,7 +487,7 @@ let dot_of_grid profiling fic enriched_grid state env =
       	| RULE _  -> fprintf desc "node_%d [label=\"%s\", shape=invhouse, style=filled, fillcolor = lightblue] ;\n" eid (label atom.kind) 
         | OBS _  ->  fprintf desc "node_%d [label =\"%s\", style=filled, fillcolor=red] ;\n" eid (label atom.kind) 
         | INIT _  ->
-					(*if !Parameter.showIntroEvents then*) fprintf desc "node_%d [label =\"%s\", shape=house, style=filled, fillcolor=green] ;\n" eid (label atom.kind)
+	    if !Parameter.showIntroEvents then fprintf desc "node_%d [label =\"%s\", shape=house, style=filled, fillcolor=green] ;\n" eid (label atom.kind)
 	| _ -> invalid_arg "Event type not handled"
 	(*		List.iter (fun obs -> fprintf desc "obs_%d [label =\"%s\", style=filled, fillcolor=red] ;\n node_%d -> obs_%d [arrowhead=vee];\n" eid obs eid eid) atom.observation ;*) 
 		) eids_at_d ;
@@ -358,33 +506,54 @@ let dot_of_grid profiling fic enriched_grid state env =
 			(fun eid' ->
 				if eid' = 0 then () 
 				else
-					(*if !Parameter.showIntroEvents then*)
+					if !Parameter.showIntroEvents then
 						fprintf desc "node_%d -> node_%d\n" eid' eid
-(*					else
+					else
 						let atom = IntMap.find eid' config.events in
 						match atom.kind with
 							| INIT _ -> ()
-							| _ -> fprintf desc "node_%d -> node_%d\n" eid' eid*)
+							| _ -> fprintf desc "node_%d -> node_%d\n" eid' eid
 			) pred_set
 	) config.prec_1 ;
 	IntMap.iter
 	(fun eid cflct_set ->
 		if eid = 0 then () 
 		else
-			let prec = try IntMap.find eid prec_star with Not_found -> IntSet.empty in
-			IntSet.iter
-			(fun eid' ->
-				if (eid' = 0) || (IntSet.mem eid' prec) then () 
-				else
-					fprintf desc "node_%d -> node_%d [style=dotted, arrowhead = tee] \n" eid eid'
-			) cflct_set
+		  let prec = try prec_star.(eid) with _ -> [] in 
+                  let _ = 
+                    IntSet.fold_inv 
+                      (fun eid' prec -> 
+                        let bool,prec = 
+                          let rec aux prec = 
+                            match 
+                              prec
+                            with 
+                            | []   -> false,prec
+                            | h::t -> 
+                              begin
+                                if h=eid'
+                                then true,t
+                                else if h>eid'
+                                then aux t
+                                else false,prec 
+                              end 
+                          in aux prec 
+                        in 
+                        let _ = 
+                          if bool then ()
+                        else 
+			    fprintf desc "node_%d -> node_%d [style=dotted, arrowhead = tee] \n" eid eid'
+                        in 
+                        prec
+		       ) cflct_set prec 
+                  in () 
 	) config.conflict ;
 	fprintf desc "}\n" ;
         fprintf desc "/*\n Dot generation time: %f\n*/" (Sys.time () -. t) ; 
         close_out desc 
 
 (*story_list:[(key_i,list_i)] et list_i:[(grid,_,sim_info option)...] et sim_info:{with story_id:int story_time: float ; story_event: int}*)
-let pretty_print compression_type label story_list state env =	
+let pretty_print config_closure compression_type label story_list state env =	
   let n = List.length story_list in 
   let _ = 
     if compression_type = "" 
@@ -394,7 +563,7 @@ let pretty_print compression_type label story_list state env =
       Debug.tag (Printf.sprintf "\n+ Pretty printing %d %scompressed flow%s" n label (if n>1 then "s" else ""))
   in
   let story_list = 
-    List.map (fun (x,y) -> enrich_grid x,y) story_list 
+    List.map (fun (x,y) -> enrich_grid config_closure x,y) story_list 
   in 
   let _ =
     List.fold_left 
@@ -446,3 +615,28 @@ let pretty_print compression_type label story_list state env =
   let _ = close_out desc in 
   ()
 	  
+let print_stat parameter handler enriched_grid = 
+  let size = Array.length enriched_grid.prec_star  in 
+  let rec aux k n_step longest_story n_nonempty length_sum length_square_sum = 
+    if k>=size 
+    then (n_step,longest_story,n_nonempty,length_sum,length_square_sum)
+    else 
+      let cc = List.length (Array.get enriched_grid.prec_star k) in
+      aux 
+        (k+1) 
+        (n_step+1)
+        (max longest_story cc)
+        (if cc>0 then n_nonempty+1 else n_nonempty)
+        (length_sum+cc)
+        (length_square_sum+cc*cc)
+  in 
+  let n_step,longest_story,n_nonempty,length_sum,length_square_sum = aux 0 0 0 0 0 0 in 
+  let _ = Debug.tag "" in 
+  let _ = Debug.tag "Stats:" in 
+  let _ = Debug.tag (" number of step   : "^(string_of_int n_step)) in 
+(*  let _ = Debug.tag (" number of stories: "^(string_of_int n_nonempty)) in *)
+  let _ = Debug.tag (" longest story    : "^(string_of_int longest_story)) in 
+  let _ = Debug.tag (" average length   : "^(string_of_float ((float_of_int length_sum)/.(float_of_int n_nonempty)))) in 
+  let _ = Debug.tag (" geometric mean   : "^(string_of_float (sqrt ((float_of_int length_square_sum)/.(float_of_int n_nonempty))))) in 
+  let _ = Debug.tag "" in 
+  ()

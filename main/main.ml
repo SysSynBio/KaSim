@@ -3,7 +3,7 @@ open Mods
 open State
 open Random_tree
 
-let version = "3.3-020513"
+let version = "3.41-151113"
 
 let usage_msg = "KaSim "^version^": \n"^"Usage is KaSim -i input_file [-e events | -t time] [-p points] [-o output_file]\n"
 let version_msg = "Kappa Simulator: "^version^"\n"
@@ -129,7 +129,7 @@ let main =
 		and grid,profiling,event_list = 
 			if Environment.tracking_enabled env then
 				let _ = 
-					if !Parameter.mazCompression || !Parameter.weakCompression then ()
+					if !Parameter.mazCompression || !Parameter.weakCompression || !Parameter.strongCompression then ()
 					else (ExceptionDefn.warning "Causal flow compution is required but no compression is specified, will output flows with no compresion"  ; 
 					Parameter.mazCompression := true)
 				in  

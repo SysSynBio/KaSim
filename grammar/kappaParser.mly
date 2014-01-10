@@ -5,7 +5,7 @@
 %token AT OP_PAR CL_PAR COMMA DOT TYPE_TOK LAR OP_CUR CL_CUR 
 %token <Tools.pos> LOG PLUS MULT MINUS AND OR GREATER SMALLER EQUAL PERT INTRO DELETE DO SET UNTIL TRUE FALSE OBS KAPPA_RAR TRACK CPUTIME CONFIG REPEAT DIFF
 %token <Tools.pos> KAPPA_WLD KAPPA_SEMI SIGNATURE INFINITY TIME EVENT NULL_EVENT PROD_EVENT INIT LET DIV PLOT SINUS COSINUS TAN SQRT EXPONENT POW ABS MODULO 
-%token <Tools.pos> EMAX TMAX FLUX ASSIGN ASSIGN2 TOKEN KAPPA_LNK PIPE KAPPA_LRAR PRINT PRINTF CAT VOLUME
+%token <Tools.pos> EMAX TMAX FLUX ASSIGN ASSIGN2 TOKEN KAPPA_LNK PIPE KAPPA_LRAR PRINT PRINTF CAT VOLUME MAX MIN
 %token <int*Tools.pos> INT 
 %token <string*Tools.pos> ID LABEL KAPPA_MRK  
 %token <float*Tools.pos> FLOAT 
@@ -80,8 +80,6 @@ instruction:
 	{Ast.SIG ($2,$1)}
 | TOKEN ID
 	{let str,pos = $2 in Ast.TOKENSIG (str,pos)}
-| VOLUME ID volume_param 
-	{let vol,param = $3 in Ast.VOLSIG ($2,vol,param)}
 | SIGNATURE error
 	{raise (ExceptionDefn.Syntax_Error (Some $1,"Malformed agent signature, I was expecting something of the form '%agent: A(x,y~u~v,z)'"))}
 	
@@ -122,17 +120,6 @@ init_declaration:
 | ID LAR multiple {(None,Ast.INIT_TOK ($3,$1))}
 | ID OP_CUR init_declaration CL_CUR {let _,init = $3 in (Some $1,init)}
 ;
-
-volume_param:
-| OP_CUR FLOAT CL_CUR opt_param {let f,_ = $2 in (f,$4)}
-| OP_CUR INT CL_CUR opt_param {let n,_ = $2 in (float_of_int n,$4)}
-;
-
-opt_param:
-| /*empty*/ {("passive",Tools.no_pos)}
-| ID {$1}
-
-
 
 value_list: 
 | STRING 
@@ -372,6 +359,10 @@ alg_expr:
 	{Ast.POW ($1,$3,$2)}
 | alg_expr MODULO alg_expr
 	{Ast.MODULO ($1,$3,$2)}	
+| MAX alg_expr alg_expr
+	{Ast.MAX ($2,$3,$1)}
+| MIN alg_expr alg_expr
+	{Ast.MIN ($2,$3,$1)}
 | EXPONENT alg_expr 
 	{Ast.EXP ($2,$1)}
 | SINUS alg_expr 

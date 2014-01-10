@@ -226,7 +226,7 @@ let loop state story_profiling event_list counter plot env =
         if Environment.tracking_enabled env then
 					begin
 	          let causal,weak,strong = (*compressed_flows:[(key_i,list_i)] et list_i:[(grid,_,sim_info option)...] et sim_info:{with story_id:int story_time: float ; story_event: int}*)
-        	    if !Parameter.weakCompression || !Parameter.mazCompression (*if a compression is required*)
+        	    if !Parameter.weakCompression || !Parameter.mazCompression || !Parameter.strongCompression (*if a compression is required*)
               then Compression_main.compress env state story_profiling event_list
               else None,None,None
 	          in
@@ -234,7 +234,7 @@ let loop state story_profiling event_list counter plot env =
 	            match x with 
 	              | None -> ()
 	              | Some flows -> 
-	                Causal.pretty_print prefix label flows state env
+	                Causal.pretty_print Graph_closure.config_std prefix label flows state env
 	          in 
 	          let _ = g "" "" causal in 
 	          let _ = g "Weakly" "weakly " weak in 
