@@ -46,15 +46,15 @@ let alg_of_id id state =
 	with | Invalid_argument msg -> invalid_arg ("State.kappa_of_id: " ^ msg)
 
 (*should use one representative of each cc of mixture in [set] in order to be more efficient*)
-let connex ?(d_map = IntMap.empty) ?(filter = false) ?start_with set with_full_components state env =  
-	let start_root = match start_with with Some r -> r | None -> IntSet.choose set in
+let connex ?(d_map = IntMap.empty) ?(filter = false) ?start_with (roots,codomain) (radius:int) with_full_components state env =  
+	let start_root = match start_with with Some r -> r | None -> IntSet.choose roots in
 	let (is_connex,d_map,component,remaining_roots) = 
 		if filter then
 			let predicate env = fun node -> Environment.is_nl_root (Node.name node) env
 			in  
-			SiteGraph.neighborhood ~check_connex:set ~complete:with_full_components ~d_map:d_map ~filter_elements:(predicate env) state.graph start_root (-1) 
+			SiteGraph.neighborhood ~check_connex:(roots,codomain) ~complete_construction:with_full_components ~d_map:d_map ~filter_elements:(predicate env) state.graph start_root radius 
 		else
-			SiteGraph.neighborhood ~check_connex:set ~complete:with_full_components ~d_map:d_map state.graph start_root (-1) 
+			SiteGraph.neighborhood ~check_connex:(roots,codomain) ~complete_construction:with_full_components ~d_map:d_map state.graph start_root radius
 	in 
 	(is_connex,d_map,component,remaining_roots)
 	
@@ -106,7 +106,7 @@ let nl_instance_number mix_id state env =
 
 
 (**[instances_of_square mix_id state] returns [(inj_0,codom_0,prod_0);...] the list of full and valid embeddings inj_i, their codomains codom_j and the explicit product prod_i=[phi_cc0;phi_cc1;...]*)
-let instances_of_square ?(disjoint=false) mix_id state env =
+let instances_of_square ?(disjoint=false) mix_id radius_def state env =
 	let extend (inj, codom) phi =
 		try
 			Some
@@ -148,7 +148,7 @@ let instances_of_square ?(disjoint=false) mix_id state env =
 		with Not_found -> []
 	in
 	(*let embeddings = List.fold_left (fun cont l -> l@cont) [] embeddings in *)
-	if not disjoint then embeddings
+	if not disjoint then embeddings (*doesn't need to check the embeddings are binary*)
 	else
 		let mix = kappa_of_id mix_id state in
 		List.fold_left 
@@ -163,7 +163,7 @@ let instances_of_square ?(disjoint=false) mix_id state env =
 					(*match Injection.root_image inj with None -> invalid_arg "State.instances_of_square" | Some (_,u_i) -> IntSet.add u_i set*)
 				) IntSet.empty inj_list 
 			in
-			let (is_connex,_,_,_) = connex roots false state env in
+			let (is_connex,_,_,_) = connex (roots,codomain) radius_def false state env in
 			if is_connex  then cont else (embedding,codomain,inj_list)::cont
 		) [] embeddings 
 
@@ -226,13 +226,14 @@ let eval_activity ?using rule state counter env =
 	(*overestimated activity of unary instances of the rule*)
 	let a_1 =
 		match rule.k_alt with
-			| None -> (Num.I 0)
-			| Some x ->
+			| (None,_) -> (Num.I 0)
+			| (Some x ,_)->
 				begin
 					match x with
 						| Dynamics.CONST f -> 
 							let n = nl_instance_number mix_id state env in 
-							Num.mult f n
+							if Mods.Num.is_zero n then (Num.I 0) (*whatever the rate is, if 0 instance then 0 activity*)
+							else Num.mult f n
 						| Dynamics.VAR k_fun ->
 							let act_of_id id = nl_instance_number id state env 
 							and v_of_var id = value state id counter env 
@@ -569,9 +570,9 @@ let empty_embedding = CONNEX {map=IntMap.empty ; roots = IntSet.empty ; componen
 let map_of embedding = match embedding with CONNEX e | DISJOINT e | AMBIGUOUS e -> e.map 
 				
 (**returns either valid embedding or raises Null_event if injection is no longer valid --function also cleans inj_hp and nodes as a side effect*)
-let check_validity injprod with_full_components state counter env =
+let check_validity injprod with_full_components radius state counter env =
 	try
-		let embedding,roots,_ = 
+		let embedding,roots,codomain = 
 			InjProduct.fold_left
 			(fun (embedding,roots,codom) inj_i ->
 				if Injection.is_trashed inj_i then (*injection product is no longer valid because one of its element is trashed*) 
@@ -599,7 +600,7 @@ let check_validity injprod with_full_components state counter env =
 					(map,roots,codom)
 			) (IntMap.empty,IntSet.empty,IntSet.empty) injprod
 		in
-		let (is_connex,d_map,components,_) = connex roots with_full_components state env in
+		let (is_connex,d_map,components,_) = connex (roots,codomain) with_full_components radius state env in
 		if is_connex then 
 			(
 			{map = embedding ; components = Some (IntMap.add 0 components IntMap.empty) ; depth_map = Some d_map ; roots = roots}
@@ -614,7 +615,7 @@ let check_validity injprod with_full_components state counter env =
 				raise (Null_event i)
 			end
 	
-let select_injection (a2,a1) state mix counter env =
+let select_injection (a2,radius_def) (a1,radius_alt) state mix counter env =
 	if Mixture.is_empty mix then empty_embedding 
   else
   	let mix_id = Mixture.get_id mix in
@@ -633,8 +634,9 @@ let select_injection (a2,a1) state mix counter env =
   							" has no instance but a positive activity"))
   		| Some prod_inj_hp ->
   			(try
+					let radius = match radius_alt with None -> (-1) | Some v -> Num.int_of_num (value state ~var:v (-1) counter env) in
   				let injprod = InjProdHeap.random prod_inj_hp in (*injprod is an array of size #cc(mix_id) and injprod.(i):Injection.t a partial injection of cc(i)*)
-  				let embedding = check_validity injprod false state counter env in (*returns either valid embedding or raises Null_event if injection is no longer valid --function also cleans inj_hp and nodes as a side effect*)
+  				let embedding = check_validity injprod radius false state counter env in (*returns either valid embedding or raises Null_event if injection is no longer valid --function also cleans inj_hp and nodes as a side effect*)
   				(CONNEX embedding)
   			with
   			| Invalid_argument msg -> invalid_arg ("State.select_injection: "^msg)
@@ -642,7 +644,7 @@ let select_injection (a2,a1) state mix counter env =
   			)
   	in
   	
-  	let select_binary clash_if_unary =
+  	let select_binary clash_if_unary = (*clash_if_unary is true if the embedding has to be binary otherwise ambiguous is OK*)
   		let opt =
   			try state.injections.(mix_id)
   			with
@@ -655,7 +657,7 @@ let select_injection (a2,a1) state mix counter env =
   						((string_of_int mix_id) ^
   							" has no instance but a positive activity"))
   		| Some comp_injs ->
-  				let _,embedding,_,roots =
+  				let _,embedding,codomain,roots = (*building the complete embedding using components embeddings --and clashing if resulting embedding is not injective*)
   					Array.fold_left
   						(fun (i, total_inj, total_cod, roots) injheap_opt ->
   									match injheap_opt with
@@ -685,12 +687,14 @@ let select_injection (a2,a1) state mix counter env =
   						(0, IntMap.empty, IntSet.empty, IntSet.empty) comp_injs
   				in
   				
-  				let rec build_component_map roots depth_map component_map = 
-  					if IntSet.is_empty roots then (depth_map,component_map)
+					let radius = match radius_def with None -> (-1) | Some v -> Num.int_of_num (value state ~var:v (-1) counter env) in
+					
+  				let rec build_component_map (roots,codomain) depth_map component_map = 
+  					if IntSet.is_empty roots then (depth_map,component_map) (*no more root to check*)
   					else
   						let root = IntSet.choose roots in
   						(*components will contain only node that can be the root of a non local rule because filter is enabled *)
-  						let (_,d_map,components,remaining_roots) = connex ~d_map:depth_map ~filter:true ~start_with:root roots true state env 
+  						let (_,d_map,components,remaining_roots) = connex ~d_map:depth_map ~filter:true ~start_with:root (roots,codomain) radius true state env 
   						in
   						if not ((IntSet.cardinal remaining_roots) = (IntSet.cardinal roots) - 1) then
   							(if !Parameter.debugModeOn then Debug.tag "Clashing because selected instance of n-nary rule is not totally disjoint" ; 
@@ -699,11 +703,11 @@ let select_injection (a2,a1) state mix counter env =
   						else () ;
   						let component_map = IntMap.add root components component_map
   						in
-  						build_component_map remaining_roots d_map component_map
+  						build_component_map (remaining_roots,codomain) d_map component_map (*remaining roots should be empty if rule has only 2 CCs*)
   				in
   				
-  				if clash_if_unary then
-  					let (d_map,comp_map) = build_component_map roots IntMap.empty IntMap.empty in
+  				if clash_if_unary then (*now checking with the contex that the embedding is indeed binary*)
+  					let (d_map,comp_map) = build_component_map (roots,codomain) IntMap.empty IntMap.empty in (*raises Null_event if roots are not connected*)
   					(DISJOINT {map=embedding; depth_map=Some d_map; roots = roots ; components = Some comp_map})
   				else
   					if not env.Environment.has_intra then (AMBIGUOUS {map=embedding;depth_map=None ; roots = roots ; components = None})
@@ -717,7 +721,7 @@ let select_injection (a2,a1) state mix counter env =
   								else
   									(if !Parameter.debugModeOn then
   										Debug.tag "Connectedness is not required for this rule but will compute it nonetheless because rule might create more intras" ;
-  									let (d_map,comp_map) = build_component_map roots IntMap.empty IntMap.empty in
+  									let (d_map,comp_map) = build_component_map (roots,codomain) IntMap.empty IntMap.empty in
   									(AMBIGUOUS {map=embedding;depth_map=Some d_map ; roots = roots ; components = Some comp_map}))
   	in
   	if not (Mixture.unary mix) then select_binary false 
@@ -765,13 +769,18 @@ let draw_rule state counter env =
 				else ()
 		in
 		let embedding_type = 
-			try select_injection (Num.float_of_num a2, Num.float_of_num a1) state r.lhs counter env with 
+			let _,radius = r.k_alt
+			in
+			try select_injection (Num.float_of_num a2,radius) (Num.float_of_num a1,radius) state r.lhs counter env with 
 			| Null_event 1 | Null_event 2 as exn -> (*null event because of clashing instance of a binary rule*)
 				if counter.Counter.cons_null_events > !Parameter.maxConsecutiveClash then 
 					begin
 						(if !Parameter.debugModeOn then Debug.tag "Max consecutive clashes reached, I am giving up square approximation at this step" else ()) ;
 						let _ = Counter.reset_consecutive_null_event counter in
-						let embeddings = instances_of_square ~disjoint:true rule_id state env in
+					
+						let radius = match radius with None -> (-1) | Some v -> Num.int_of_num (value state ~var:v (-1) counter env) in
+  				
+						let embeddings = instances_of_square ~disjoint:true rule_id radius state env in
 						let alpha,_ = eval_activity ~using:(List.length embeddings) r state counter env in 
 						let alpha = Num.float_of_num alpha in
 						begin

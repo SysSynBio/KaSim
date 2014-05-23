@@ -523,7 +523,15 @@ let signature_of_ast s env =
 let token_of_ast abs_tk env = 
 	let (name, pos) = abs_tk in
 	Environment.declare_token name pos env
-	
+
+let reduce_val v env = 
+	let (k, const, opt_v, dep, _) = partial_eval_alg env v
+	in
+	if const then match opt_v with 
+		| Some v -> (CONST v, dep) 
+		| None -> invalid_arg "Eval.reduce_val: Variable is constant but was not evaluated"
+	else ((VAR k), dep)
+
 let rule_of_ast ?(backwards=false) env (ast_rule_label, ast_rule) tolerate_new_state = 
 	let ast_rule_label,ast_rule = if backwards then Ast.flip (ast_rule_label, ast_rule) else (ast_rule_label, ast_rule) in
 	let (env, lhs_id) =
@@ -531,26 +539,19 @@ let rule_of_ast ?(backwards=false) env (ast_rule_label, ast_rule) tolerate_new_s
 	(* reserving an id for rule's lhs in the pattern table *)
 	let env = Environment.declare_rule ast_rule_label.lbl_nme lhs_id env in
 	let (k_def, dep) =
-		let (k, const, opt_v, dep, _) = partial_eval_alg env ast_rule.k_def
-		in
-		if const then match opt_v with 
-			| Some v -> (CONST v, dep) 
-			| None -> invalid_arg "Eval.rule_of_ast: Variable is constant but was not evaluated"
-		else ((VAR k), dep)
+		let k_def = ast_rule.k_def in
+		let k_def,dep = reduce_val k_def env in
+		(k_def,dep)
 	
-	and (env,k_alt, dep_alt) =
+	and (env,k_alt,radius,dep_alt) =
 		match ast_rule.k_un with
-		| None -> (env,None, DepSet.empty)
-		| Some ast ->
+		| None -> (env,None,None, DepSet.empty)
+		| Some (ast,ast_opt) -> (****TODO HERE treat ast_opt that specifies application radius****)
 				let env = Environment.declare_unary_rule (Some (Environment.kappa_of_num lhs_id env,Tools.no_pos)) (*ast_rule_label.lbl_nme*) lhs_id env in
-				let (rate, const, opt_v, dep, _) = partial_eval_alg env ast
+				let k_alt,dep = reduce_val ast env in
+				let radius_alt,dep = match ast_opt with None -> (None,dep) | Some v -> let rad,dep' = (reduce_val v env) in (Some rad,DepSet.union dep dep')  
 				in
-				if const
-				then
-					let v = match opt_v with Some v -> v | None -> invalid_arg "Eval.rule_of_ast: Variable is constant but was not evaluated"
-					in
-					(env,(Some (CONST v)), dep)
-				else (env,(Some (VAR rate)), dep)
+				(env,Some k_alt,radius_alt,dep)
 	in
 	let lhs,env = mixture_of_ast (Some lhs_id) true env ast_rule.lhs
 	in 
@@ -695,8 +696,8 @@ let rule_of_ast ?(backwards=false) env (ast_rule_label, ast_rule) tolerate_new_s
 		{
 			Dynamics.add_token = add_token ;
 			Dynamics.rm_token = rm_token ;
-			Dynamics.k_def = k_def;
-			Dynamics.k_alt = k_alt;
+			Dynamics.k_def = k_def ;
+			Dynamics.k_alt = (k_alt,radius) ;
 			Dynamics.over_sampling = None;
 			Dynamics.script = script;
 			Dynamics.kappa = kappa_lhs ^ ("->" ^ kappa_rhs);
@@ -952,7 +953,7 @@ let pert_of_result variables env res =
 								{
 									(*TODO*)Dynamics.rm_token = [] ; Dynamics.add_token = [] ; 
 									Dynamics.k_def = Dynamics.CONST (Num.F 0.0);
-									Dynamics.k_alt = None;
+									Dynamics.k_alt = (None,None);
 									Dynamics.over_sampling = None;
 									Dynamics.script = script ;
 									Dynamics.kappa = kappa_lhs ^ ("->" ^ kappa_rhs);
@@ -992,8 +993,8 @@ let pert_of_result variables env res =
 								let rule = 
 								{ (*TODO*) Dynamics.rm_token = [] ; Dynamics.add_token = [] ; 
 									
-									Dynamics.k_def = Dynamics.CONST (Num.F 0.0);
-									Dynamics.k_alt = None;
+									Dynamics.k_def = Dynamics.CONST (Num.F 0.0); 
+									Dynamics.k_alt = (None,None);
 									Dynamics.over_sampling = None;
 									Dynamics.script = script ;
 									Dynamics.kappa = kappa_lhs ^ ("->" ^ kappa_rhs);

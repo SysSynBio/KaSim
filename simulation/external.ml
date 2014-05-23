@@ -95,7 +95,7 @@ let trigger_effect state env pert_ids tracked pert_events pert p_id eff eval_var
 					and pert_events = ref pert_events
 					in
 						while !n > 0 do (*FIXME: highly unefficient to compute new injection at each loop*)
-							let embedding_t = State.select_injection (infinity,0.) state r.lhs counter env in (*empty embedding, cannot raise null-event*)
+							let embedding_t = State.select_injection (infinity,None) (0.,None) state r.lhs counter env in (*empty embedding, cannot raise null-event*)
 							let (env, state, side_effects, embedding_t, psi, pert_ids_neg) = State.apply !st r embedding_t counter env in
 							let phi = State.map_of embedding_t in
 							let env,state,pert_ids_pos,new_injs,tracked' = State.positive_update ~with_tracked:!tracked state r (phi,psi) (side_effects,Int2Set.empty) counter env
@@ -125,11 +125,11 @@ let trigger_effect state env pert_ids tracked pert_events pert p_id eff eval_var
 				in
 					while !cpt < x do
 						let opt = 
-							try Some (State.select_injection (infinity,0.) state mix counter env) with 
+							try Some (State.select_injection (infinity,None) (0.,None) state mix counter env) with 
 								| Not_found -> None (*Not found is raised if there is no more injection to draw in instances of mix*)
 								| Null_event _ -> 
 									if !Parameter.debugModeOn then Debug.tag "Clashing instance detected: building matrix";
-									let matrix = State.instances_of_square mix_id state env in
+									let matrix = State.instances_of_square mix_id (-1) state env in
 										match matrix with
 											| (embedding,_,_)::_ -> Some (CONNEX {map=embedding; roots = IntSet.empty ; components = None ; depth_map = None}) 
 											| [] -> None
