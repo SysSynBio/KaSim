@@ -10,7 +10,7 @@ open ExceptionDefn
 let update_intra_in_components r embedding_info state counter env =
 	if !Parameter.debugModeOn then Debug.tag "Looking for side effect update of non local rules..." ;
 	let components = 
-		match embedding_info.components with
+		match embedding_info.Embedding.components with
 			| Some map -> map
 			| None -> invalid_arg "NonLocal.update_intra_in_components: component not computed"
 	in
@@ -56,34 +56,35 @@ let update_intra_in_components r embedding_info state counter env =
 	in
 	
 	(*reusing components that were computed to check that the rule was indeed binary*)
-	let con_map = match r.Dynamics.cc_impact with None -> invalid_arg "State.nl_pos_upd: cc_impact is not initialized"  | Some (map,_,_) -> map in
+	let con_map = match r.Primitives.cc_impact with None -> invalid_arg "State.nl_pos_upd: cc_impact is not initialized"  | Some (map,_,_) -> map in
 	
 	let extensions,found = (*r_id -> cc_id -> part_inj_list*)
 		IntMap.fold 
 		(fun eq cc_set (extensions,found) ->
-			if !Parameter.debugModeOn then
-				Debug.tag (Printf.sprintf "CCs %s are merged by the rule and CC[%d] is the representative" (string_of_set string_of_int IntSet.fold cc_set) eq) ;
+		 Debug.tag_if_debug "CCs {%a} are merged by the rule and CC[%d] is the representative"
+				    (Pp.set IntSet.elements Pp.comma
+					    Format.pp_print_int) cc_set
+				    eq;
 			IntSet.fold 
 			(fun cc_i (extensions,found) ->
 				let root = 
-					match Mixture.root_of_cc r.lhs cc_i with Some r -> IntMap.find r embedding_info.map | None -> invalid_arg "State.nl_positive_update" 
+					match Mixture.root_of_cc r.Primitives.lhs cc_i with Some r -> IntMap.find r embedding_info.Embedding.map | None -> invalid_arg "State.nl_positive_update" 
 				in
 				let _ = 
-					if !Parameter.debugModeOn then Debug.tag (Printf.sprintf "Exploring into image of CC[%d] computed during rule %d application" cc_i r.r_id)
+					if !Parameter.debugModeOn then Debug.tag (Printf.sprintf "Exploring into image of CC[%d] computed during rule %d application" cc_i r.Primitives.r_id)
 	 			in
-				let component_i = 
-					try IntMap.find root components with 
-						| Not_found -> 
-							(Debug.tag 
-							(Printf.sprintf "root %d (= phi(%d)) not found in %s" root (match Mixture.root_of_cc r.lhs cc_i with Some r -> r | None -> -1)
-								(Tools.string_of_map string_of_int (Tools.string_of_set string_of_int IntSet.fold) 
-								IntMap.fold 
-								components
-								)
-							); invalid_arg "nl_pos_upd")
+				let component_i =
+				  try IntMap.find root components
+				  with Not_found ->
+				    (Debug.tag_if_debug "root %d (= phi(%d)) not found in %a" root (match Mixture.root_of_cc r.Primitives.lhs cc_i with Some r -> r | None -> -1)
+							(Pp.set IntMap.bindings Pp.comma
+								(fun f (i,s) ->
+								 Format.fprintf f "%i -> {%a}" i (Pp.set IntSet.elements Pp.comma Format.pp_print_int) s))
+							components;
+				     invalid_arg "nl_pos_upd")
 				in
-				if !Parameter.debugModeOn then Debug.tag (Tools.string_of_set string_of_int IntSet.fold component_i) ;
-				let opt = search_elements state.graph component_i extensions env
+				Debug.tag_if_debug "{%a}" (Pp.set IntSet.elements Pp.comma Format.pp_print_int) component_i ;
+				let opt = search_elements (get_graph state) component_i extensions env
 				in
 				match opt with
 					| Some ext -> (ext,found+1) 
@@ -126,7 +127,7 @@ let update_intra_in_components r embedding_info state counter env =
 				else
 					List.fold_left  (*nl_injections : (InjProdHeap.t option) array*)
 					(fun state injprod_map -> 
-						let injprod_hp = match state.nl_injections.(r_id) with
+						let injprod_hp = match (get_nl_injections state).(r_id) with
 							| Some hp -> hp
 							| None -> InjProdHeap.create !Parameter.defaultHeapSize 
 						in
@@ -136,8 +137,8 @@ let update_intra_in_components r embedding_info state counter env =
 						in
 						try
 							let injprod_hp = InjProdHeap.alloc ~check:true ip injprod_hp in
-							state.nl_injections.(r_id) <- Some injprod_hp ;
-							update_activity state r.r_id r_id counter env ;
+							(get_nl_injections state).(r_id) <- Some injprod_hp ;
+							update_activity state ~cause:r.Primitives.r_id r_id counter env ;
 							state
 						with
 							| InjProdHeap.Is_present -> state
@@ -167,13 +168,13 @@ let rec update_rooted_intras new_injs state counter env =
 						let _,liftset = Node.get_lifts node 0 in
 						LiftSet.exists (fun inj -> let (mix_id',cc_id') = Injection.get_coordinate inj in (mix_id' = mix_id) && (cc_id <> cc_id') ) liftset
 				in   
-				let (_,d_map,components,_) = SiteGraph.neighborhood ~filter_elements:predicate state.graph u_0 (-1) in
+				let (_,d_map,components,_) = SiteGraph.neighborhood ~filter_elements:predicate (get_graph state) u_0 (-1) in
 				
 				(*components contains nodes whose name is the root of at least one complemetary injection*)
 				let candidate_map = 
 					IntSet.fold 
 					(fun u_i map -> 
-						let node = SiteGraph.node_of_id state.graph u_i in
+						let node = SiteGraph.node_of_id (get_graph state) u_i in
 						let _,lifts = Node.get_lifts node 0 in
 						LiftSet.fold 
 						(fun inj map -> 
@@ -185,17 +186,17 @@ let rec update_rooted_intras new_injs state counter env =
 						) lifts map
 					) components IntMap.empty
 				in 
-				if !Parameter.debugModeOn then
-					begin
-						Printf.printf "Trying to extend (%d,%d) : %s with:\n" mix_id cc_id (Injection.to_string injection) ;
-						IntMap.iter 
-						(fun cc_id' inj_list -> 
-							Printf.printf "(%d,%d):%s\n" mix_id cc_id' 
-							(Tools.string_of_list Injection.string_of_coord inj_list)
-						) candidate_map 
-					end ;
-				if IntMap.size candidate_map < (Mixture.arity (kappa_of_id mix_id state)) - 1 then 
-					update_rooted_intras tl state counter env
+				Debug.tag_if_debug
+				  "@[<v>@[Trying to extend (%d,%d) : %a with:@]@,@[%a@]@]@."
+				  mix_id cc_id Injection.print injection
+				  (Pp.set IntMap.bindings Pp.empty
+					  (fun f (cc_id',inj_list) ->
+					   Format.fprintf
+					     f "(%d,%d):[%a]\n" mix_id cc_id'
+					     (Pp.list Pp.colon Injection.print_coord) inj_list))
+				  candidate_map;
+				if IntMap.size candidate_map < (Mixture.arity (kappa_of_id mix_id state)) - 1 then
+				  update_rooted_intras tl state counter env
 				else
 					let new_intras = 
 						IntMap.fold (*folding on candidate map*)
@@ -215,10 +216,18 @@ let rec update_rooted_intras new_injs state counter env =
 						) candidate_map [IntMap.add cc_id injection IntMap.empty]
 					in
 										
-					if !Parameter.debugModeOn then
-						List.iter (fun injmap -> Debug.tag ("new_intras: "^(string_of_map string_of_int Injection.string_of_coord IntMap.fold injmap))) new_intras ;
-					
-					let injprod_hp = match state.nl_injections.(mix_id) with None -> InjProdHeap.create !Parameter.defaultHeapSize | Some hp -> hp in
+					Debug.tag_if_debug
+					  "%a" (Pp.list Pp.empty
+							(fun f injmap ->
+							 Format.fprintf f "new_intras: %a"
+									(Pp.set IntMap.bindings Pp.comma
+										(fun f (i,c) -> Format.fprintf
+												  f "%i->%a" i
+												  Injection.print_coord c))
+									injmap))
+					  new_intras ;
+
+					let injprod_hp = match (get_nl_injections state).(mix_id) with None -> InjProdHeap.create !Parameter.defaultHeapSize | Some hp -> hp in
 					let mix = kappa_of_id mix_id state in
 					let injprod_hp = 
 						List.fold_left
@@ -255,8 +264,8 @@ let rec update_rooted_intras new_injs state counter env =
 									injprod_hp 
 						) injprod_hp new_intras
 					in
-					state.nl_injections.(mix_id) <- Some injprod_hp ;
-					update_activity state (-1) mix_id counter env ;
+					(get_nl_injections state).(mix_id) <- Some injprod_hp ;
+					update_activity state mix_id counter env ;
 					update_rooted_intras tl state counter env
 
 let initialize_embeddings state counter env = 
@@ -275,7 +284,7 @@ let initialize_embeddings state counter env =
 		) lifts state 
 		else 
 			state
-	) state.graph state
+	) (get_graph state) state
 	
 
 
@@ -286,22 +295,14 @@ let positive_update r embedding_t new_injs state counter env =
 	(*Step 2 : Non local positive update *)
 	(*If rule is potentially breaking up some connected component this should wake up silenced rules*)
 	begin
-		match r.Dynamics.cc_impact with 
+		match r.Primitives.cc_impact with
 			| None -> (if !Parameter.debugModeOn then Debug.tag "Rule cannot decrease connectedness no need to update silenced rules") 
-			| Some _ -> (*should be more precise here*)
-				if IntSet.is_empty state.silenced then (if !Parameter.debugModeOn then Debug.tag "No silenced rule, skipping")
-				else
-	 				IntSet.fold
-					(fun id _ ->
-					if !Parameter.debugModeOn then Debug.tag (Printf.sprintf "Updating silenced rule %d" id) ; 
-					update_activity state r.Dynamics.r_id id counter env ;
-					state.silenced <- IntSet.remove id state.silenced ;
-					) state.silenced () 
+			| Some _ -> (*should be more precise here*) State.unsilence_rule state r counter env
 	end ;
 		
 	(*If rule is potentially merging two connected components this should trigger a positive update of non local rules*)
 	begin
-		match r.Dynamics.cc_impact with
+		match r.Primitives.cc_impact with
 			| None -> 
 				(if !Parameter.debugModeOn then 
 					Debug.tag "No possible side effect update of unary rules because applied rule cannot increase connectedness" ;
@@ -312,12 +313,12 @@ let positive_update r embedding_t new_injs state counter env =
 				else
 					begin
 						match embedding_t with
-							| CONNEX _ -> 
+							| Embedding.CONNEX _ -> 
 								(if !Parameter.debugModeOn then 
 									Debug.tag "No possible side effect update of unary rules because a unary instance was applied"; 
 								state
 								)
-							| DISJOINT e | AMBIGUOUS e -> (*one may need to compute connected components if they are not present in e, as in the AMBIGUOUS case*)
+							| Embedding.DISJOINT e | Embedding.AMBIGUOUS e -> (*one may need to compute connected components if they are not present in e, as in the AMBIGUOUS case*)
 								update_intra_in_components r e state counter env 
 					end
 	end 

@@ -8,9 +8,9 @@ let defaultLogSize = ref 10
 let debugModeOn = ref false
 let progressBarSymbol = ref '#'
 let progressBarSize = ref 60
-let plotSepChar = ref ' '
+let plotSepChar = ref (fun f -> Format.pp_print_space f ())
 let dumpIfDeadlocked = ref false
-let maxConsecutiveClash = ref 10
+let maxConsecutiveClash = ref 2
 let backtrace = ref false
 let (rescale:int option ref) = ref None
 let eclipseMode = ref false
@@ -48,9 +48,8 @@ let emacsMode = ref false
 (*User definable values*)
 let (maxEventValue:int option ref) = ref None
 let (maxTimeValue:float option ref) = ref None
-let (pointNumberValue:int option ref) = ref None
+let (pointNumberValue:int ref) = ref 0
 let (seedValue:int option ref) = ref None
-let plotModeOn = ref false
 let compileModeOn = ref false
 let implicitSignature = ref false
 let dotOutput = ref false
@@ -94,47 +93,25 @@ let marshalizedInFile = ref ""
 let marshalizedOutFile = ref ""
 
 
-let set name ext_opt = 
-	if !name = "" then ()
-	else
-	let fname = Filename.concat !outputDirName !name in
-	let fname = 
-		match ext_opt with
-			| None -> fname
-			| Some ext ->
-				if (Filename.check_suffix fname ext) then fname 
-				else 
-				(fname^"."^ext)
-	in
-	name:=fname
+let set name ext_opt =
+  if !name <> "" then
+    let fname =
+      match ext_opt with
+      | None -> !name
+      | Some ext ->
+	 if (Filename.check_suffix !name ext) then !name
+	 else
+	   (!name^"."^ext)
+    in
+    name:=fname
 
-let setOutputName () = 
-	set snapshotFileName (Some "dot");
-	set dumpFileName (Some "ka");
-	set influenceFileName (Some "dot") ;
-	set fluxFileName (Some "dot") ;
-	set marshalizedOutFile None;
-	set cflowFileName (Some "dot") ; 
-	set outputDataName None
-
-let checkFileExists () =
-	let check file =  
-		match file with
-			| "" -> ()
-			| file -> 
-				if Sys.file_exists file then 
-					begin
-						Printf.fprintf stderr "File '%s' already exists do you want to erase (y/N)? \n" file ; flush stderr ; 
-						let answer = Tools.read_input () in
-						if answer="y" then () else exit 1
-					end
-				else ()
-	in
-	check !influenceFileName ;
-	check !fluxFileName ;
-	check !marshalizedOutFile ; 
-	let points = match !pointNumberValue with None -> false | Some _ -> true in
-	if points then check !outputDataName 
+let setOutputName () =
+  set snapshotFileName (Some "dot");
+  set dumpFileName (Some "ka");
+  set influenceFileName (Some "dot") ;
+  set fluxFileName (Some "dot") ;
+  set marshalizedOutFile None;
+  set outputDataName None
 
 let (openOutDescriptors:out_channel list ref) = ref []
 let (openInDescriptors:in_channel list ref) = ref []
@@ -161,4 +138,4 @@ let get_causal_trace x = x.causal_trace
 let get_causal_trace_only x = not (x.weak_compression || x.strong_compression)
 let get_weak_compression x = x.weak_compression
 let get_strong_compression x = x.strong_compression
-let get_cache_size x = !cache_size 
+let get_cache_size x = !cache_size

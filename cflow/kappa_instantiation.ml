@@ -28,7 +28,7 @@ let compose f g = (fun x -> f (g x))
 module type Cflow_signature =
 sig
   module H:Cflow_handler.Cflow_handler 
-  module P:Profiling.StoryStats 
+  module P:StoryProfiling.StoryStats 
   type agent_name = int
   type site_name = int 
   type agent_id = int 
@@ -81,7 +81,7 @@ sig
   type refined_event 
   type refined_step
   type obs_from_rule_app = (int * int Mods.IntMap.t) list 
-  type r = Dynamics.rule 
+  type r = Primitives.rule 
   type counter = int 
   type rule_info = obs_from_rule_app * r * counter * kasim_side_effect
                    
@@ -118,17 +118,18 @@ sig
 
   val print_test: (string -> test -> H.error_channel) H.with_handler
   val print_action: (string -> action -> H.error_channel) H.with_handler 
-  val print_side: out_channel -> H.handler -> string  -> (site*binding_state) -> unit
+  val print_side:
+    Format.formatter -> H.handler -> string  -> (site*binding_state) -> unit
 
   val print_refined_step: (refined_step -> H.error_channel) H.with_handler 
 
 
-  val import_event:  (Dynamics.rule * int Mods.IntMap.t * int Mods.IntMap.t) * rule_info -> event 
+  val import_event:  (Primitives.rule * int Mods.IntMap.t * int Mods.IntMap.t) * rule_info -> event 
   val store_event: P.log_info -> event -> step list -> P.log_info * step list 
-  val store_init : P.log_info -> State.implicit_state -> step list -> P.log_info * step list 
+  val store_init : P.log_info -> State.t -> step list -> P.log_info * step list 
   val store_obs :  P.log_info -> int * Mixture.t * int Mods.IntMap.t * unit Mods.simulation_info -> step list -> P.log_info * step list 
   val build_grid: (refined_step * side_effect * bool)  list -> bool -> H.handler -> Causal.grid 
-  val print_side_effect: out_channel -> side_effect -> unit
+  val print_side_effect: Format.formatter -> side_effect -> unit
   val side_effect_of_list: (int*int) list -> side_effect 
   val no_obs_found: step list -> bool 
 
@@ -155,7 +156,7 @@ end
 module Cflow_linker = 
 (struct 
   module H = Cflow_handler.Cflow_handler 
-  module P = Profiling.StoryStats 
+  module P = StoryProfiling.StoryStats 
 
   type agent_name = int
  
@@ -169,14 +170,14 @@ module Cflow_linker =
 
   type site = agent * site_name 
 
-  type kappa_rule = Dynamics.rule
+  type kappa_rule = Primitives.rule
 
   type embedding = agent_id Mods.IntMap.t 
   type side_effect = (agent_id*int) list 
   type kasim_side_effect = Mods.Int2Set.t 
   type fresh_map = int Mods.IntMap.t 
   type obs_from_rule_app = (int * int Mods.IntMap.t) list 
-  type r = Dynamics.rule 
+  type r = Primitives.rule 
   type counter = int  
   type rule_info = (obs_from_rule_app * r  * counter * kasim_side_effect) 
   type init = agent * (site_name * (int option * Node.ptr)) list
@@ -321,54 +322,66 @@ module Cflow_linker =
       | BOUND_to site -> "!"^(string_of_site env site)
 
   let print_init log env ((agent,list):init) =
-    let ag = (string_of_agent env agent) in 
-    let _ = Printf.fprintf log "%s(" ag in 
-    let _ = 
-      List.fold_left 
-        (fun bool (s,(i,l)) -> 
-          let _ = 
-            Printf.fprintf log "%s%s%s%s" 
-              (if bool then "," else "")
-              (string_of_int s)
-              (match i with 
-              | None -> ""
-              | Some i -> "~"^(string_of_int i))
-              (match l with 
-              | Node.Null -> ""
-              | Node.Ptr (t,i) -> "!"^(string_of_int t.Node.name)^"."^(string_of_int i)
-              | Node.FPtr (i,j) -> "!T"^(string_of_int i)^"."^(string_of_int j))
-          in true)
+    let ag = (string_of_agent env agent) in
+    let _ = Format.fprintf log "%s(" ag in
+    let _ =
+      List.fold_left
+        (fun bool (s,(i,l)) ->
+         let _ =
+           Format.fprintf log "%s%s%s%s"
+			  (if bool then "," else "")
+			  (string_of_int s)
+			  (match i with
+			   | None -> ""
+			   | Some i -> "~"^(string_of_int i))
+			  (match l with
+			   | Node.Null -> ""
+			   | Node.Ptr (t,i) ->
+			      "!"^(string_of_int t.Node.name)^"."^(string_of_int i)
+			   | Node.FPtr (i,j) ->
+			      "!T"^(string_of_int i)^"."^(string_of_int j))
+         in true)
         false (List.rev list)
-    in Printf.fprintf log ")"
-            
-      
-  let print_event log env ((rule,emb,fresh),(rule_info)) = 
-    Printf.fprintf log "%s" rule.Dynamics.kappa 
+    in Format.fprintf log ")"
 
-  let print_obs log env obs = () 
+  let print_event log env ((rule,emb,fresh),(rule_info)) =
+    Format.fprintf log "%a->%a"
+		   (Kappa_printer.mixture false env) rule.Primitives.lhs
+		   (Kappa_printer.mixture false env) rule.Primitives.rhs
 
-  let print_test parameter handler error prefix test = 
-    let log = parameter.H.out_channel in 
-    let _ = 
-      match test with 
-      | Is_Here agent -> Printf.fprintf log "%sIs_Here(%s)\n" prefix (string_of_agent handler agent)
-      | Has_Internal (site,int) -> Printf.fprintf log "%sHas_Internal(%s~%s)\n" prefix (string_of_site handler site) (string_of_internal_state handler int)
-      | Is_Free site -> Printf.fprintf log "%sIs_Free(%s)\n" prefix (string_of_site handler site)
-      | Is_Bound site -> Printf.fprintf log "%sIs_Bound(%s)\n" prefix (string_of_site handler site)
-      | Has_Binding_type (site,btype) -> Printf.fprintf log "%sBtype(%s,%s)\n" prefix (string_of_site handler site) (string_of_btype handler btype)
-      | Is_Bound_to (site1,site2) -> Printf.fprintf log "%sIs_Bound(%s,%s)\n" prefix (string_of_site handler site1) (string_of_site handler site2)
-    in error 
+  let print_obs log env obs = ()
+
+  let print_test parameter handler error prefix test =
+    let log = parameter.H.out_channel in
+    let _ =
+      match test with
+      | Is_Here agent ->
+	 Format.fprintf log "%sIs_Here(%s)\n" prefix (string_of_agent handler agent)
+      | Has_Internal (site,int) ->
+	 Format.fprintf log "%sHas_Internal(%s~%s)\n" prefix
+			(string_of_site handler site) (string_of_internal_state handler int)
+      | Is_Free site ->
+	 Format.fprintf log "%sIs_Free(%s)\n" prefix (string_of_site handler site)
+      | Is_Bound site ->
+	 Format.fprintf log "%sIs_Bound(%s)\n" prefix (string_of_site handler site)
+      | Has_Binding_type (site,btype) ->
+	 Format.fprintf log "%sBtype(%s,%s)\n" prefix
+			(string_of_site handler site) (string_of_btype handler btype)
+      | Is_Bound_to (site1,site2) ->
+	 Format.fprintf log "%sIs_Bound(%s,%s)\n" prefix
+			(string_of_site handler site1) (string_of_site handler site2)
+    in error
   let print_action parameter handler error prefix action =
     let log = parameter.H.out_channel in 
     let _ = 
       match action with 
       | Create (agent,list) -> 
-	let _ = Printf.fprintf log "%sCreate(%s[" prefix (string_of_agent handler agent) in 
+	let _ = Format.fprintf log "%sCreate(%s[" prefix (string_of_agent handler agent) in 
 	let _ = 
 	    List.fold_left 
               (fun bool (x,y) -> 
 		let _ = 
-		  Printf.fprintf 
+		  Format.fprintf 
 		    log 
 		    "%s%s%s" 
 		    (if bool then "," else "")
@@ -378,27 +391,32 @@ module Cflow_linker =
 		     | Some y -> "~"^(string_of_int y))
 		in true)
 	      false list in
-	let _ = Printf.fprintf log "])\n" in
+	let _ = Format.fprintf log "])\n" in
 	()
-      | Mod_internal (site,int) -> Printf.fprintf log "%sMod(%s~%s)\n" prefix (string_of_site handler site) (string_of_internal_state handler int)
-      | Bind (site1,site2) | Bind_to (site1,site2) -> Printf.fprintf log "%sBind(%s,%s)\n" prefix (string_of_site handler site1) (string_of_site handler site2)
-      | Unbind (site1,site2)  -> Printf.fprintf log "%sUnBind(%s,%s)\n" prefix (string_of_site handler site1) (string_of_site handler site2)
-      | Free site ->  Printf.fprintf log "%sFree(%s)\n" prefix (string_of_site handler site)
-      | Remove agent -> Printf.fprintf log "%sRemove(%s)\n" prefix (string_of_agent handler agent)
-    in error 
+      | Mod_internal (site,int) ->
+	 Format.fprintf log "%sMod(%s~%s)\n" prefix (string_of_site handler site) (string_of_internal_state handler int)
+      | (Bind (site1,site2) | Bind_to (site1,site2)) ->
+	 Format.fprintf log "%sBind(%s,%s)\n" prefix (string_of_site handler site1) (string_of_site handler site2)
+      | Unbind (site1,site2)  ->
+	 Format.fprintf log "%sUnBind(%s,%s)\n" prefix (string_of_site handler site1) (string_of_site handler site2)
+      | Free site ->
+	 Format.fprintf log "%sFree(%s)\n" prefix (string_of_site handler site)
+      | Remove agent ->
+	 Format.fprintf log "%sRemove(%s)\n" prefix (string_of_agent handler agent)
+    in error
 
   let print_side log env prefix (s,binding_state) = 
-    Printf.fprintf log "%s(%s,%s)\n" prefix (string_of_site env s) (string_of_binding_state env binding_state)
+    Format.fprintf log "%s(%s,%s)\n" prefix (string_of_site env s) (string_of_binding_state env binding_state)
 
-  let lhs_of_rule rule = rule.Dynamics.lhs 
+  let lhs_of_rule rule = rule.Primitives.lhs 
   let lhs_of_event = compose lhs_of_rule rule_of_event
     
   let get_agent parameter handler error agent_id lhs fresh_map = 
     let i,map = 
       match agent_id 
       with 
-	| Dynamics.KEPT i -> (i,Mixture.agents lhs)
-	| Dynamics.FRESH i -> (i,fresh_map)
+	| Primitives.KEPT i -> (i,Mixture.agents lhs)
+	| Primitives.FRESH i -> (i,fresh_map)
     in 
       try 
 	error,Mods.IntMap.find i map 
@@ -406,7 +424,7 @@ module Cflow_linker =
 	| Not_found -> 
             let error_list,error = 
               H.create_error parameter handler error (Some "kappa_instantiation.ml") None (Some "get_agent") (Some "401") (Some "Kappa_instantiation") (failwith "Kappa instantiation, line 401")  in 
-            H.raise_error parameter handler error_list error Mixture.empty_agent
+            H.raise_error parameter handler error_list error Mixture.dummy_agent
  	    
   let name_of_agent parameter handler error agent_id event fresh_map = 
     let error,agent = get_agent parameter handler error agent_id event fresh_map in 
@@ -416,7 +434,7 @@ module Cflow_linker =
     Mixture.create_agent 
       name
       (List.fold_left
-	  (fun map (a,b) -> Mods.IntMap.add a (b,Node.FREE) map)
+	  (fun map (a,b) -> Mods.IntMap.add a (b,Mixture.FREE) map)
 	  Mods.IntMap.empty interface)
 
   let build_site a b = (a,b)
@@ -519,19 +537,19 @@ module Cflow_linker =
   let apply_embedding_on_action event id = 
     match id 
     with 
-      | Dynamics.KEPT i -> apply_embedding event i 
-      | Dynamics.FRESH i -> apply_fresh_map event i 
+      | Primitives.KEPT i -> apply_embedding event i 
+      | Primitives.FRESH i -> apply_fresh_map event i 
 
   let get_binding_state_of_site parameter handler error agent_id site_name mixture embedding fresh_map =
     match agent_id 
     with 
-      | Dynamics.KEPT(id) ->
+      | Primitives.KEPT(id) ->
 	  begin 
 	    match 
 	      Mixture.follow (id,site_name) mixture
 	    with 
 	      | Some (ag,site) -> 
-		  let fake_id = Dynamics.KEPT ag in 
+		  let fake_id = Primitives.KEPT ag in 
 		  let agent_id = apply_map ag embedding in 
 		  let error,kappa_agent = get_agent parameter handler error fake_id mixture fresh_map in 
 		  let agent_name = Mixture.name kappa_agent in 
@@ -545,16 +563,17 @@ module Cflow_linker =
 		      try 
 			let interface = Mixture.interface agent in 
 			  match snd (Mods.IntMap.find site_name interface)
-			  with 
-			    | Node.WLD -> ANY
-			    | Node.FREE -> FREE
-			    | Node.BND -> BOUND
-			    | Node.TYPE(site_name,agent_name) -> BOUND_TYPE(agent_name,site_name)
+			  with
+			    | Mixture.WLD -> ANY
+			    | Mixture.FREE -> FREE
+			    | Mixture.BND -> BOUND
+			    | Mixture.TYPE(site_name,agent_name) ->
+			       BOUND_TYPE(agent_name,site_name)
 		      with 
 			  Not_found -> ANY
 		  end 
 	  end
-      | Dynamics.FRESH _ -> error,ANY 
+      | Primitives.FRESH _ -> error,ANY 
 
 
 
@@ -606,7 +625,7 @@ module Cflow_linker =
   let tests_of_lhs parameter handler error lhs embedding =
     Mods.IntMap.fold 
 	(fun lhs_id ag (error,list) -> 
-	   let fake_id = Dynamics.KEPT lhs_id in 
+	   let fake_id = Primitives.KEPT lhs_id in 
 	   let agent_id = apply_map lhs_id embedding in 
 	   let agent_name = Mixture.name ag in 
 	   let agent = build_agent agent_id agent_name in 
@@ -622,12 +641,13 @@ module Cflow_linker =
 		   | None -> list
 		 in 
 		 let list' = 
-		   match lnk with 
-		   | Node.WLD -> list 
-		   | Node.FREE -> Is_Free(site)::list 
-		   | Node.BND -> Is_Bound(site)::list 
-		   | Node.TYPE(site_name,agent_name) -> Has_Binding_type(site,(agent_name,site_name))::list
-		 in 
+		   match lnk with
+		   | Mixture.WLD -> list
+		   | Mixture.FREE -> Is_Free(site)::list
+		   | Mixture.BND -> Is_Bound(site)::list
+		   | Mixture.TYPE(site_name,agent_name) ->
+		      Has_Binding_type(site,(agent_name,site_name))::list
+		 in
 		 refine_bound_state parameter handler error site list list' fake_id lhs embedding 
 	     )
 	     ag (error,list)
@@ -637,7 +657,7 @@ module Cflow_linker =
 
   let tests_of_event parameter handler error event = 
     let rule = rule_of_event event in 
-    let lhs = rule.Dynamics.lhs in 
+    let lhs = rule.Primitives.lhs in 
     let embedding = embedding_of_event event in 
     tests_of_lhs parameter handler error lhs embedding 
       
@@ -646,7 +666,7 @@ module Cflow_linker =
   let agent_of_node n = build_agent (Node.get_address n) (Node.name n) 
 
   let create_init state log_info event_list = 
-    Graph.SiteGraph.fold
+    State.fold_graph
 	  (fun node_id node (log_info,list)  ->
             let interface = 
 		Node.fold_status
@@ -661,7 +681,7 @@ module Cflow_linker =
             let agent = build_agent node_id (Node.name node) in 
             let log_info = P.inc_n_init_events log_info in 
             (log_info,(Init (agent,interface))::list))
-          state.State.graph 
+          state
           (log_info,event_list) 
 
   let actions_of_init parameter handler error (init:init) = 
@@ -687,14 +707,14 @@ module Cflow_linker =
 
   let actions_of_event parameter handler error event = 
     let rule = rule_of_event event in 
-    let lhs = rule.Dynamics.lhs in
+    let lhs = rule.Primitives.lhs in
     let embedding = embedding_of_event event in 
     let a,b,_,error = 
       List.fold_left
 	(fun (list_actions,side_sites,fresh,error) action -> 
 	   match action 
 	   with 
-	     | Dynamics.BND((lhs_id1,site1),(lhs_id2,site2)) ->
+	     | Primitives.BND((lhs_id1,site1),(lhs_id2,site2)) ->
 		 let agent_id1 = apply_embedding_on_action event lhs_id1 in 
 		 let error,agent_name1 = name_of_agent parameter handler error lhs_id1  lhs fresh in 
 		 let agent1 = build_agent agent_id1 agent_name1 in
@@ -710,7 +730,7 @@ module Cflow_linker =
 		     fresh,
                      error
 		   )
-	     | Dynamics.FREE((lhs_id,site_name),bool) ->
+	     | Primitives.FREE((lhs_id,site_name),bool) ->
 		 let agent_id = apply_embedding_on_action event lhs_id in 
 		 let error,agent_name = name_of_agent parameter handler error lhs_id lhs fresh in
 		 let agent = build_agent agent_id agent_name in 
@@ -734,7 +754,7 @@ module Cflow_linker =
                    fresh,
                    error
 		     
-	     | Dynamics.MOD((lhs_id,site),internal) -> 
+	     | Primitives.MOD((lhs_id,site),internal) ->
 		 let agent_id = apply_embedding_on_action event lhs_id in 
 		 let error,agent_name = name_of_agent parameter handler error lhs_id lhs fresh in 
 		 let agent = build_agent agent_id agent_name in 
@@ -744,8 +764,8 @@ module Cflow_linker =
 		 fresh,
                  error
 		   
-	     | Dynamics.DEL(lhs_id) -> 
-		 let fake_id = Dynamics.KEPT lhs_id in 
+	     | Primitives.DEL(lhs_id) ->
+		 let fake_id = Primitives.KEPT lhs_id in
 		 let agent_id = apply_embedding event lhs_id in 
 		 let error,agent_name = name_of_agent parameter handler error fake_id lhs fresh in 
 		 let agent = build_agent agent_id agent_name in 
@@ -767,8 +787,9 @@ module Cflow_linker =
 		 fresh,
                  error
 		
-	     | Dynamics.ADD(rhs_id,agent_name) -> 
-		 let agent_id = apply_embedding_on_action event (Dynamics.FRESH rhs_id) in 
+	     | Primitives.ADD(rhs_id,agent_name) ->
+		let agent_id =
+		  apply_embedding_on_action event (Primitives.FRESH rhs_id) in
 		 let error,interface = get_default_state parameter handler error agent_name in 
 		 let agent = build_agent agent_id agent_name in 
 		 let kappa_agent = build_kappa_agent agent_name interface in 
@@ -776,7 +797,7 @@ module Cflow_linker =
 		 let fresh' = add_asso rhs_id kappa_agent fresh in 
 		   list_actions',side_sites,fresh',error)
 	([],[],Mods.IntMap.empty,error)
-	rule.Dynamics.script
+	rule.Primitives.script
     in error,(List.rev a,b)
 
       
@@ -823,7 +844,7 @@ module Cflow_linker =
 
   let print_side_effects parameter handler error prefix (site,state) = 
     let _ = 
-      Printf.fprintf 
+      Format.fprintf 
         parameter.H.out_channel
         "%sSide_effects(%s:%s)\n" 
         prefix 
@@ -832,26 +853,26 @@ module Cflow_linker =
     in error 
 
   let print_refined_obs parameter handler error refined_obs = 
-    let _ = Printf.fprintf parameter.H.out_channel "***Refined obs***" 
+    let _ = Format.fprintf parameter.H.out_channel "***Refined obs***" 
     in error 
 
   let print_refined_subs parameter handler error a b  = error
 
   let print_refined_event parameter handler error refined_event = 
     let log = parameter.H.out_channel in 
-    let _ = Printf.fprintf log "***Refined event:***\n" in 
-    let _ = Printf.fprintf log "* Kappa_rule \n" in 
+    let _ = Format.fprintf log "***Refined event:***\n" in 
+    let _ = Format.fprintf log "* Kappa_rule \n" in 
     let error,rule = rule_of_refined_event parameter handler error refined_event in 
-    let _ = Dynamics.dump rule  handler.H.env in 
-    let _ = Printf.fprintf log "\n" in 
+    let _ = Dynamics.dump Format.err_formatter rule  handler.H.env in
+    let _ = Format.fprintf log "\n" in 
     let error = 
-      let _ = Printf.fprintf log "Story encoding: \n" in 
+      let _ = Format.fprintf log "Story encoding: \n" in 
       let error,tests = tests_of_refined_event parameter handler error refined_event in 
       let error = List.fold_left (fun error -> print_test parameter handler error " ") error (List.rev tests) in 
       let error,actions = actions_of_refined_event parameter handler error refined_event in 
       let error = List.fold_left (fun error -> print_action parameter handler error " ") error (fst actions) in 
       let error = List.fold_left (fun error -> print_side_effects parameter handler error " ") error (List.rev (snd actions)) in 
-      let _ = Printf.fprintf log "***\n"  in 
+      let _ = Format.fprintf log "***\n"  in 
       error
     in 
     error
@@ -859,13 +880,13 @@ module Cflow_linker =
   let print_refined_init parameter handler error (refined_init:refined_init) = 
     let log = parameter.H.out_channel in 
     let ((agent_name,agent_id),_),actions = refined_init in 
-    let _ = Printf.fprintf log "INIT: Agent %i_%i\n" agent_id agent_name in
+    let _ = Format.fprintf log "INIT: Agent %i_%i\n" agent_id agent_name in
     let error = 
       List.fold_left  
         (fun error -> print_action parameter handler error " ") 
         error 
         actions in 
-    let _ = Printf.fprintf log "\n" in 
+    let _ = Format.fprintf log "\n" in 
     error
       
   let gen f0 f1 f2 f3 f4 (p:H.parameter) h e step = 
@@ -1056,7 +1077,7 @@ module Cflow_linker =
       (List.rev list) 
 
   let print_side_effect log l = 
-    List.iter (fun (a,b) -> Printf.fprintf log "(%i,%i)," a b) l 
+    List.iter (fun (a,b) -> Format.fprintf log "(%i,%i)," a b) l 
   let side_effect_of_list l = l 
 
   let rec no_obs_found l = 
@@ -1206,19 +1227,20 @@ module Cflow_linker =
         refined_event 
     with 
     | error,Subs (a,b) -> 
-      let _ = Printf.fprintf log "Subs: %s/%s" (string_of_int b) (string_of_int a) in error 
-    | error,Event event -> 
-      let _ = print_event log handler event in error 
+      let _ = Format.fprintf log "Subs: %s/%s" (string_of_int b) (string_of_int a) in error 
+    | error,Event event ->
+       let () = print_event log handler.Cflow_handler.Cflow_handler.env event in
+       error
     | error,Init init -> 
-      let _ = Printf.fprintf log "Init: " in 
+      let _ = Format.fprintf log "Init: " in 
       let _ = print_init log handler init in 
       error
     | error,Obs obs -> 
-      let _ = Printf.fprintf log "Obs: " in 
+      let _ = Format.fprintf log "Obs: " in 
       let _ = print_obs log handler obs in 
       error 
     | error,Dummy x -> 
-      let _ = Printf.fprintf log "%s" x in error 
+      let _ = Format.fprintf log "%s" x in error 
 
   let agent_id_in_obs parameter handler error step = 
     match step 
@@ -1240,4 +1262,3 @@ module Cflow_linker =
       end
         
 end:Cflow_signature)
-

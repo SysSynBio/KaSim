@@ -29,15 +29,15 @@ module type Cflow_handler =
             priorities_weak: Priority.priorities ;
             priorities_strong : Priority.priorities ;
             priorities_causal : Priority.priorities ;
-            out_channel_err : out_channel ;
-            out_channel_profiling : out_channel ;
-            out_channel : out_channel 
+            out_channel_err : Format.formatter ;
+            out_channel_profiling : Format.formatter ;
+            out_channel : Format.formatter
           } (*a struct which contains parameterizable options*)  
     type error 
     type error_channel = error list    (*a list which contains the errors so far*)
     type handler =   (*handler to interpret abstract values*)
           {
-            state: State.implicit_state ;
+            state: State.t ;
             env: Environment.t ;
           }
     type 'a with_handler = parameter -> handler -> error_channel -> 'a
@@ -67,21 +67,21 @@ module Cflow_handler =
             priorities_weak: Priority.priorities ;
             priorities_strong : Priority.priorities ;
             priorities_causal: Priority.priorities ;
-            out_channel_err : out_channel ;
-            out_channel_profiling: out_channel ;
-            out_channel : out_channel 
+            out_channel_err : Format.formatter;
+            out_channel_profiling: Format.formatter;
+            out_channel : Format.formatter
           }
 
       let build_parameter () = 
-        let channel = open_out !Parameter.profilingName in 
+        let channel = Tools.kasim_open_out !Parameter.profilingName in 
         {
           current_compression_mode = None ; 
           priorities_weak = Priority.weak ; 
           priorities_strong = Priority.strong2 ; 
           priorities_causal = Priority.causal ;
-          out_channel = stderr ; 
-          out_channel_err = stderr ; 
-          out_channel_profiling = channel ;
+          out_channel = Format.err_formatter ;
+          out_channel_err = Format.err_formatter ;
+          out_channel_profiling = Format.formatter_of_out_channel channel ;
           compression_mode = Parameter.get_compression_mode () ; 
           cache_size = Parameter.get_cache_size () ;
         }
@@ -104,7 +104,7 @@ module Cflow_handler =
       type error_channel = error list
       type handler = 
           {
-            state: State.implicit_state ;
+            state: State.t ;
             env: Environment.t ;
           }
 
@@ -134,9 +134,9 @@ module Cflow_handler =
           with 
             | None -> ()
             | Some mes ->
-              Printf.fprintf log "%s%s%s" prefix mes suffix 
+              Format.fprintf log "%s%s%s" prefix mes suffix 
         in 
-        let g s = Printf.fprintf log "%s" s in 
+        let g s = Format.fprintf log "%s" s in 
         let _ = g "Internal Error\n" in 
         let _ = f "File: " "\n" error.caml_file in 
         let _ = f "Line: " "\n" error.caml_line in         

@@ -11,27 +11,32 @@ exception Break of int
 (* 3:overapproximation clash *)
 (* 4:invalid injection clash *)
 (* 5: perturbation interrupting time*)
-exception Null_event of int 
+exception Null_event of int
 exception Deadlock
 exception UserInterrupted of (float -> int -> string)
 exception StopReached of string
 
 exception Syntax_Error of (Tools.pos option) * string
+exception Malformed_Decl of string Term.with_pos
 exception Semantics_Error of Tools.pos * string
 exception Unsatisfiable
 
-let warning_buffer:string list ref = ref []
+let warning_buffer:(Format.formatter -> unit) list ref = ref []
 
-let warning ?with_pos msg = 
-	let str = 
-		match with_pos with
-			| Some pos -> (Tools.string_of_pos pos)^" "
-			| None -> ""
-	in
-		warning_buffer := ("WARNING: "^str^msg^"\n")::!warning_buffer
+let warning ?pos msg =
+  let pr f =
+    match pos with
+    | Some pos -> Format.fprintf f "%a@," Pp.position pos
+    | None -> Format.fprintf f ""
+  in
+  warning_buffer :=
+    (fun f -> Format.fprintf f "@[<v>%tWarning: @[%t@]@]@." pr msg)::
+      !warning_buffer
 
-let flush_warning () = 
-	prerr_string "\n";
-	let l = List.rev !warning_buffer in
-	List.iter (fun s -> prerr_string s) l ;
-	flush stderr
+let deprecated ~pos entry msg =
+  warning ~pos (fun f -> Format.fprintf f "Deprecated %s syntax:@ %t" entry msg)
+
+let flush_warning () =
+  Format.pp_print_newline Format.err_formatter ();
+  let l = List.rev !warning_buffer in
+  List.iter (fun s -> Format.eprintf "%t" s) l

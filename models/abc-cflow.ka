@@ -18,16 +18,16 @@
 %var: 'on_rate' 1.0E-3 # per molecule per second
 %var: 'off_rate' 0.1 # per second 
 %var: 'mod_rate' 1 # per second 
-%obs: 'AB' A(x!x.B)
-%obs: 'Cuu' C(x1~u?,x2~u?)
-%obs: 'Cpu' C(x1~p?,x2~u?) 
-%obs: 'Cpp' C(x1~p?,x2~p?) 
+%obs: 'AB' |A(x!x.B)|
+%obs: 'Cuu' |C(x1~u?,x2~u?)|
+%obs: 'Cpu' |C(x1~p?,x2~u?)|
+%obs: 'Cpp' |C(x1~p?,x2~p?)|
 
-%var: 'n_ab' 1000 
+%var: 'n_ab' 1000
 %obs: 'n_c' 0
-%var: 'C' C()
+%var: 'C' |C()|
 
-%var: 'cflow' [inf]
+%var: 'cflow' INF
 
 #### Initial conditions 
 %init: 'n_ab' A(),B()
@@ -37,7 +37,7 @@
 
 %mod: repeat ([E+] [mod] 1000 = 0) do \
  ($UPDATE 'snapshots' ('snapshots'+1) ; \
- $SNAPSHOT <"snap".[int]([E+]/1000).".ka">) \
+ $SNAPSHOT "snap".[int]([E+]/1000).".ka") \
  until [false]
 
 %mod: [T]>5 do $ADD 10000 C()
@@ -47,5 +47,5 @@
 
 %def: "cflowFileName" "abc-flow"
 %def: "displayCompression" "none" "weak" "strong"
-%def: "dotSnapshots" "true"
+%def: "dotSnapshots" "false"
 %def: "showIntroEvents" "true"
