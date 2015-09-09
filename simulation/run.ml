@@ -1,7 +1,5 @@
 open Mods
-open Tools
 open ExceptionDefn
-open Random_tree
 
 (** random exponential selection if finite, next perturbation time if
 infinite ... *)
@@ -21,20 +19,23 @@ let determine_time_advance activity state counter env =
 			    | Some dt -> dt
 			    | None -> Mods.Counter.last_increment counter
 	  end
-       | _ -> dt
+       | (Term.TIME | Term.ALG _ | Term.EVENT | Term.ABORT _ | Term.RULE _
+	  | Term.KAPPA _ | Term.TOK _) -> dt
       ) depset infinity
 
-let event state maybe_active_pert_ids story_profiling
-	  event_list counter env =
-  (* 1. Updating dependencies of time or event number *)
+let exec_perts err_fmt pert_ids state counter env =
   let env,pert_ids =
-    State.update_dep state Term.EVENT maybe_active_pert_ids counter env in
+    State.update_dep state Term.EVENT pert_ids counter env in
   let env,pert_ids =
     State.update_dep state Term.TIME pert_ids counter env in
-  (* 2. Applying perturbations *)
+  External.try_perturbate err_fmt [] state pert_ids [] counter env
+
+
+let event stdout state maybe_active_pert_ids story_profiling
+	  event_list counter env =
+  (* 1. Updating dependencies of time or event numb then apply perturbations *)
   let state,remain_pert_ids,env,obs_from_perturbation,pert_events =
-    External.try_perturbate [] state pert_ids [] counter env
-  in
+    exec_perts stdout maybe_active_pert_ids state counter env in
   (* Adding perturbation event to story -if any *)
   let story_profiling,event_list,cpt =
     if Environment.tracking_enabled env then (*if logging events is required*)
@@ -42,10 +43,10 @@ let event state maybe_active_pert_ids story_profiling
 	List.fold_left
 	  (fun (story_prof,event_list,cpt) (r,phi,psi,side_effects) ->
 	   let sp,el =
-	       Compression_main.D.S.PH.B.PB.CI.Po.K.store_event
+	       Compression_main.secret_store_event
 		 story_prof
-		 (Compression_main.D.S.PH.B.PB.CI.Po.K.import_event
-		    ((r,phi,psi),(obs_from_perturbation,r,cpt+1,side_effects))) event_list (*we are adding several events with the same id in the grid!*)
+		 ((r,phi,psi),(obs_from_perturbation,r,cpt+1,side_effects))
+		 event_list (*we are adding several events with the same id in the grid!*)
 	   in
 	   (sp,el,cpt+1)
 	  ) (story_profiling,event_list,Counter.event counter) pert_events
@@ -56,7 +57,7 @@ let event state maybe_active_pert_ids story_profiling
   in
   let () = counter.Counter.perturbation_events <- cpt in
 
-  (*3. Time advance*)
+  (*2. Time advance*)
   let activity = State.total_activity state in
   if activity < 0. then invalid_arg "Activity invariant violation" ;
   let activity = abs_float activity (* -0 must become +0 *) in
@@ -65,16 +66,16 @@ let event state maybe_active_pert_ids story_profiling
 	     begin
 	       if !Parameter.dumpIfDeadlocked then
 		 let desc =
-		   Tools.kasim_open_out (if !Parameter.dotOutput
-					 then "deadlock.dot"
-					 else "deadlock.ka") in
+		   Kappa_files.open_out (if !Parameter.dotOutput
+					  then "deadlock.dot"
+					  else "deadlock.ka") in
 		 let () =
 		   State.snapshot state counter desc true env in
 		 close_out desc
 	       else () ;
 	       raise Deadlock
 	     end in
-  Plot.fill state counter env dt ;
+  Plot.fill stdout state counter env dt ;
   Counter.inc_time counter dt ;
 
   State.dump state counter env ;
@@ -91,9 +92,9 @@ let event state maybe_active_pert_ids story_profiling
     | None -> false
   in
 
-  (*4. Draw rule*)
-  if !Parameter.debugModeOn then
-    Debug.tag (Printf.sprintf "Drawing a rule... (activity=%f) " (State.total_activity state));
+  (*3. Draw rule*)
+  Debug.tag_if_debug "Drawing a rule... (activity=%f)"
+		     (State.total_activity state);
 
   (*let t_draw = StoryProfiling.start_chrono () in*)
   let opt_instance,state =
@@ -103,7 +104,7 @@ let event state maybe_active_pert_ids story_profiling
       | Null_event i -> (Counter.stat_null i counter ; (None,state))
   in
 
-  (*5. Apply rule & negative update*)
+  (*4. Apply rule & negative update*)
   let opt_new_state =
     match opt_instance with
     | None -> None
@@ -126,13 +127,13 @@ let event state maybe_active_pert_ids story_profiling
        with Null_event _ -> None
   in
 
-  (*6. Positive update*)
+  (*5. Positive update*)
 
   let env,state,pert_ids,story_profiling,event_list =
     match opt_new_state with
     | None ->
        begin
-	 if !Parameter.debugModeOn then Debug.tag "Null (clash or doesn't satisfy constraints)";
+	 Debug.tag_if_debug "Null (clash or doesn't satisfy constraints)";
 	 Counter.inc_null_events counter ;
 	 Counter.inc_consecutive_null_events counter ;
 	 (env,state,remain_pert_ids,story_profiling,event_list)
@@ -145,8 +146,9 @@ let event state maybe_active_pert_ids story_profiling
 
        (*Local positive update: adding new partial injection*)
        let env,state,pert_ids',new_injs,obs_from_rule_app =
-	 State.positive_update state r (State.Embedding.map_of embedding_t) psi side_effect Int2Set.empty counter env
-       in
+	 State.positive_update
+	   stdout state r (State.Embedding.map_of embedding_t) psi
+	   side_effect Int2Set.empty counter env in
 
        (*Non local positive update: adding new possible intras*)
        let state =
@@ -166,7 +168,10 @@ let event state maybe_active_pert_ids story_profiling
 	 if Environment.tracking_enabled env then (*if logging events is required*)
 	   begin
 	     let story_profiling,event_list =
-	       Compression_main.D.S.PH.B.PB.CI.Po.K.store_event story_profiling (Compression_main.D.S.PH.B.PB.CI.Po.K.import_event ((r,phi,psi),(obs_from_rule_app,r,Counter.event counter,side_effect))) event_list
+	       Compression_main.secret_store_event
+		 story_profiling
+		 ((r,phi,psi),(obs_from_rule_app,r,Counter.event counter,side_effect))
+		 event_list
 	     in
 	     (story_profiling,event_list)
 	   end
@@ -186,7 +191,7 @@ let event state maybe_active_pert_ids story_profiling
 	       List.fold_left
 		 (fun (story_profiling,event_list) (obs,phi) ->
 		  let lhs = State.kappa_of_id obs state in
-		  Compression_main.D.S.PH.B.PB.CI.Po.K.store_obs story_profiling (obs,lhs,phi,simulation_info) event_list
+		  Compression_main.secret_store_obs story_profiling (obs,lhs,phi,simulation_info) event_list
 		 )
 		 (story_profiling,event_list) obs_from_rule_app
 	     in
@@ -200,9 +205,29 @@ let event state maybe_active_pert_ids story_profiling
   in
   (state,pert_ids,story_profiling,event_list,env)
 
-let loop state story_profiling event_list counter env =
+let finalize stdout env counter state story_profiling event_list =
+  let () = Plot.close stdout counter in
+  if Environment.tracking_enabled env then
+    let causal,weak,strong =
+      (*compressed_flows:[(key_i,list_i)] et list_i:[(grid,_,sim_info option)...] et sim_info:{with story_id:int story_time: float ; story_event: int}*)
+      if !Parameter.weakCompression || !Parameter.mazCompression
+	 || !Parameter.strongCompression (*if a compression is required*)
+      then Compression_main.compress stdout env state story_profiling event_list
+      else None,None,None
+    in
+    let g prefix label x =
+      match x with
+      | None -> ()
+      | Some flows ->
+	 Causal.pretty_print stdout Graph_closure.config_std prefix label
+			     flows state env in
+    let _ = g "" "" causal in
+    let _ = g "Weakly" "weakly " weak in
+    g "Strongly" "strongly " strong
+
+let loop_cps stdout hook return state story_profiling event_list counter env =
   (*Before entering the loop*)
-  Counter.tick counter counter.Counter.time counter.Counter.events ;
+  Counter.tick stdout counter counter.Counter.time counter.Counter.events ;
 
   let rec iter state pert_ids story_profiling event_list counter env =
     let () = Debug.tag_if_debug
@@ -211,28 +236,16 @@ let loop state story_profiling event_list counter env =
     if (Counter.check_time counter) && (Counter.check_events counter)
        && not (Counter.stop counter) then
       let state,pert_ids,story_profiling,event_list,env =
-	event state pert_ids story_profiling event_list counter env
+	event stdout state pert_ids story_profiling event_list counter env
       in
-      iter state pert_ids story_profiling event_list counter env
+      hook (fun () -> iter state pert_ids story_profiling event_list counter env)
     else (*exiting the loop*)
-      let () = Plot.fill state counter env 0.0 in (*Plotting last measures*)
-      let () = Plot.close counter in
-      if Environment.tracking_enabled env then
-	let causal,weak,strong =
-	  (*compressed_flows:[(key_i,list_i)] et list_i:[(grid,_,sim_info option)...] et sim_info:{with story_id:int story_time: float ; story_event: int}*)
-          if !Parameter.weakCompression || !Parameter.mazCompression
-	     || !Parameter.strongCompression (*if a compression is required*)
-          then Compression_main.compress env state story_profiling event_list
-          else None,None,None
-	in
-	let g prefix label x =
-	  match x with
-	  | None -> ()
-	  | Some flows ->
-	     Causal.pretty_print Graph_closure.config_std prefix label flows state env
-	in
-	let _ = g "" "" causal in
-	let _ = g "Weakly" "weakly " weak in
-	g "Strongly" "strongly " strong
+      let () = Plot.fill stdout state counter env 0.0 in (*Plotting last measures*)
+      let state,_remain_pert_ids,env,_obs_from_perturbation,_pert_events =
+	exec_perts stdout pert_ids state counter env in
+      return stdout env counter state story_profiling event_list
   in
   iter state (State.all_perturbations state) story_profiling event_list counter env
+
+let loop stdout state story_profiling event_list counter env =
+  loop_cps stdout (fun f -> f ()) finalize state story_profiling event_list counter env

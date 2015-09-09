@@ -1,11 +1,42 @@
 language: OCaml
 
-before_install:
-  - sudo add-apt-repository ppa:avsm/ppa -y
-  - sudo apt-get update -qq
+env:
+  global:
+    secure: bZcUIoyDu8tL8xyO6FL8JjfpRQe2QzzdKav7/V68NVjRxVNuc6FPc+VTchaVtKAfo7iVxjk0krUpyOeQujY3j8uL+ePs7dswGDHY/9trTyGws7NvcCzH+UrR5Yn2TM6I6ill5eHiBiW9W1/eX+K8UiSd/Usk9gZeBjJyz76tZh4=
 
-install: sudo apt-get install -qq ocaml-nox
+addons:
+  apt:
+    sources:
+    - avsm
+    packages:
+    - ocaml-nox
+    - opam
+
+matrix:
+  include:
+  - env: CHECKED=js
+  - env: CHECKED=native
+    addons:
+      apt:
+        sources:
+          - avsm
+        packages:
+          - ocaml-nox
+          - opam
+          - gnuplot-nox
+          - graphviz
+          - texlive-latex-recommended
+          - tex4ht
+
+install:
+  - opam init -a git://github.com/ocaml/opam-repository && eval $(opam config env)
+  - opam install ocamlfind
+  - sh -c "if [ '$CHECKED' = js ] ; then opam install -y reactiveData tyxml js_of_ocaml ; fi"
 
 script:
   - make all
-  - make -j2 check
+  - sh -c "if [ '$CHECKED' = native ] ; then make doc_html ; fi"
+  - sh -c "if [ '$CHECKED' = native ] ; then make -j2 check ; fi"
+  - sh -c "if [ '$CHECKED' = js ] ; then make js/JaSim.js ; fi"
+
+after_success: dev/update-web.sh $CHECKED

@@ -1,0 +1,62 @@
++ Command line is: 'KaSim' '-i' 'side-effects.ka' '-seed' '924556145' '-e' '199' '-d' 'output'
+Parsing side-effects.ka...
+done
++ Initialized random number generator with seed 924556145
++ Compiling...
+	 -simulation parameters
+	 -agent signatures
+	 -variable declarations
+	 -initial conditions
+	 -rules
+	 -observables
+	 -perturbations
+	 Done
++ Analyzing non local patterns...
++ Building initial simulation state...
+	 -Counting initial local patterns...
+	 Done
+____________________________________________________________
+############################################################
++ Producing causal compressions
+	 - refining events
+	 - detecting siphons
+	 - cutting concurrent events
+	 - computing causal past of each observed events (3)
+
+Stats:
+ number of step   : 215
+ longest story    : 137
+ average length   : 73.0620155039
+ geometric mean   : 82.2055940306
+
+	 - causal & weak flow compression (3)
+
+____________________________________________________________
+############################################################	 - detecting pseudo inverse events
+	 - computing causal past of each observed events (3)
+
+Stats:
+ number of step   : 90
+ longest story    : 86
+ average length   : 81.
+ geometric mean   : 81.1028154053
+
+	 - causal & weak flow compression (3)
+
+____________________________________________________________
+############################################################
+
+
+
+
++ Pretty printing 3 flows
+
++ Pretty printing 1 weakly compressed flow
+
+Simulation ended (eff.: 0.759542, detail below)
+	Valid embedding but no longer unary when required: 0.000000
+	Valid embedding but not binary when required: 0.000000
+	Clashing instance: 0.000000
+	Lazy negative update: 1.000000
+	Lazy negative update of non local instances: 0.000000
+	Perturbation interrupting time advance: 0.000000

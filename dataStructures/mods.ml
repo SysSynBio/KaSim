@@ -62,8 +62,6 @@ end = struct
     let is_trashed phi = match phi.address with Some (-1) -> true | _ -> false
 
     let add i j phi = Hashtbl.replace phi.map i j ; phi
-    let mem i phi = Hashtbl.mem phi.map i
-    let size phi = Hashtbl.length phi.map
     let find i phi = Hashtbl.find phi.map i
     let empty n (mix_id,cc_id) =
       {map = Hashtbl.create n ; address = None ; coordinate = (mix_id,cc_id)}
@@ -96,12 +94,6 @@ end = struct
     let print_coord f phi =
       let a = get_address phi and (m,c) = get_coordinate phi in
       Format.fprintf f "(%d,%d,%d)" m c a
-
-    let copy phi =
-      fold (fun i j phi' -> add i j phi') phi
-	   {map = Hashtbl.create (size phi) ;
-	    address = None ;
-	    coordinate = get_coordinate phi}
   end
 
 module InjProduct =
@@ -133,7 +125,7 @@ module InjProduct =
 		
     let is_complete injprod =
       try
-	(Array.iteri (fun i inj_i ->
+	(Array.iter (fun inj_i ->
 		      let a,_ = Injection.get_coordinate inj_i in
 		      if a<0 then raise False else ()) injprod.elements ; true)
       with False -> false
@@ -168,7 +160,7 @@ module InjProduct =
 
     let fold_left f cont phi = Array.fold_left f cont phi.elements
 		
-    let print f phi = Pp.array Injection.print f phi.elements
+    let print f phi = Pp.plain_array Injection.print f phi.elements
   end
 
 (*module Activity:(ValMap.ValMap with type content = float) = 
@@ -240,42 +232,40 @@ module Counter =
 
     let last_increment c = let _,t = c.last_tick in (c.time -. t)
 
-    let compute_dT () =
-      let points = !Parameter.pointNumberValue in
+    let compute_dT points mx_t =
       if points <= 0 then None else
-	match !Parameter.maxTimeValue with
+	match mx_t with
 	| None -> None
 	| Some max_t -> Some (max_t /. (float_of_int points))
 
-    let compute_dE () =
-      let points = !Parameter.pointNumberValue in
+    let compute_dE points mx_e =
       if points <= 0 then None else
-	match !Parameter.maxEventValue with
+	match mx_e with
 	| None -> None
 	| Some max_e ->
 	   Some (max (max_e / points) 1)
 
-    let tick counter time event =
+    let tick f counter time event =
       let () =
 	if not counter.initialized then
 	  let c = ref !Parameter.progressBarSize in
 	  while !c > 0 do
-	    Format.print_string "_" ;
+	    Format.pp_print_string f "_" ;
 	    c:=!c-1
 	  done ;
-	  Format.print_newline () ;
+	  Format.pp_print_newline f () ;
 	  counter.initialized <- true
       in
       let last_event,last_time = counter.last_tick in
       let n_t =
-	match !Parameter.maxTimeValue with
+	match counter.max_time with
 	| None -> 0
 	| Some tmax ->
 	   int_of_float
 	     ((time -. last_time) *.
 		(float_of_int !Parameter.progressBarSize) /. tmax)
       and n_e =
-	match !Parameter.maxEventValue with
+	match counter.max_events with
 	| None -> 0
 	| Some emax ->
 	   if emax = 0 then 0
@@ -289,26 +279,30 @@ module Counter =
       let n = ref (max n_t n_e) in
       if !n>0 then set_tick counter (event,time) ;
       while !n > 0 do
-	Format.printf "%c" !Parameter.progressBarSymbol ;
-	if !Parameter.eclipseMode then Format.print_newline ();
+	Format.fprintf f "%c" !Parameter.progressBarSymbol ;
+	if !Parameter.eclipseMode then Format.pp_print_newline f ();
 	inc_tick counter ;
 	n:=!n-1
       done;
-      Format.print_flush ()
+      Format.pp_print_flush f ()
 
     let stat_null i c =
       try c.stat_null.(i) <- c.stat_null.(i) + 1
-      with exn -> invalid_arg "Invalid null event identifier"
+      with _ -> invalid_arg "Invalid null event identifier"
 
-    let create init_t init_e mx_t mx_e =
-      let dE = compute_dE() in
-      let dT = match dE with None -> compute_dT() | Some _ -> None
+    let create nb_points init_t init_e mx_t mx_e =
+      let dE =
+	compute_dE nb_points (Tools.option_map (fun x -> x - init_e) mx_e) in
+      let dT = match dE with
+	  None ->
+	  compute_dT nb_points (Tools.option_map (fun x -> x -. init_t) mx_t)
+	| Some _ -> None
       in
       {time = init_t ;
        events = init_e ;
        null_events = 0 ;
        cons_null_events = 0;
-       stat_null = Array.init 6 (fun i -> 0) ;
+       stat_null = Array.init 6 (fun _ -> 0) ;
        perturbation_events = 0;
        null_action = 0 ;
        max_time = mx_t ;
@@ -348,31 +342,30 @@ module Palette:
 	  let string_of_color (r,g,b) = String.concat "," (List.rev_map string_of_float [b;g;r])
 	end
 
-
-	let tick_stories n_stories (init,last,counter) =
-	  let () =
-	    if not init then
-	      let c = ref !Parameter.progressBarSize in
-	      let () = Format.print_newline () in
-              while !c > 0 do
-		Format.print_string "_" ;
-		c:=!c-1
-	      done ;
-	      Format.print_newline()
-	  in
-	  let nc = (counter * !Parameter.progressBarSize) / n_stories in
-          let nl = (last * !Parameter.progressBarSize) / n_stories in
-          let n = nc - nl in
-          let rec aux n =
-            if n<=0 then ()
-            else
-              let () = Format.printf "%c" (!Parameter.progressBarSymbol) in
-              let () = if !Parameter.eclipseMode then print_newline() in
-              aux (n-1)
-          in
-          let () = aux n in
-	  let _ =  Format.print_flush () in
-          (true,counter,counter+1)
+let tick_stories f n_stories (init,last,counter) =
+  let () =
+    if not init then
+      let c = ref !Parameter.progressBarSize in
+      let () = Format.pp_print_newline f () in
+      while !c > 0 do
+	Format.pp_print_string f "_" ;
+	c:=!c-1
+      done ;
+      Format.pp_print_newline f ()
+  in
+  let nc = (counter * !Parameter.progressBarSize) / n_stories in
+  let nl = (last * !Parameter.progressBarSize) / n_stories in
+  let n = nc - nl in
+  let rec aux n =
+    if n<=0 then ()
+    else
+      let () = Format.fprintf f "%c" (!Parameter.progressBarSymbol) in
+      let () = if !Parameter.eclipseMode then Format.pp_print_newline f () in
+      aux (n-1)
+  in
+  let () = aux n in
+  let _ =  Format.pp_print_flush f () in
+  (true,counter,counter+1)
 
 type 'a simulation_info = (* type of data to be given with obersables for story compression (such as date when the obs is triggered*)
     {
@@ -388,9 +381,6 @@ let update_profiling_info a info =
     story_time = info.story_time ;
     story_event = info.story_event ;
     profiling_info = a}
-
-let dump_simulation_info log info = 
-  Printf.fprintf log "Story: %i\nTime: %f\nEvent: %i\n" info.story_id info.story_time info.story_event 
 
 let compare_profiling_info info1 info2 = 
   match info1,info2

@@ -12,10 +12,16 @@
 "KaSa_rep/error_handlers" : include
 "KaSa_rep/data_structures" : include
 "KaSa_rep/lib" : include
-"KaSa_rep/lib/light" : include
 "KaSa_rep/main" : include
 "KaSa_rep/tools" : include
 "KaSa_rep/frontend/preprocess" : include
 "KaSa_rep/influence_map" : include
 "KaSa_rep/export_to_KaSim" : include
-true : bin_annot
+"KaSa_rep/automatically_generated" : include
+"KaSa_rep/counting_enumeration" : include
+"KaSa_rep/data_structures/mvbdu" : include
+"KaSa_rep/sanity_test" : include
+"KaSa_rep/reachability_analysis" : include
+
+
+true : bin_annot, package(str), package(unix)

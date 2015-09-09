@@ -1,3 +1,24 @@
+let print_ast_link f = function
+  | Ast.FREE -> ()
+  | Ast.LNK_TYPE ((p,_), (a,_)) -> Format.fprintf f "!%s.%s" p a
+  | Ast.LNK_ANY -> Format.fprintf f "?"
+  | Ast.LNK_SOME -> Format.fprintf f "!_"
+  | Ast.LNK_VALUE i -> Format.fprintf f "!%i" i
+
+let print_ast_internal f l =
+  Pp.list Pp.empty (fun f (x,_) -> Format.fprintf f "~%s" x) f l
+
+let print_ast_port f p =
+  Format.fprintf f "%s%a%a" (fst p.Ast.port_nme)
+		 print_ast_internal p.Ast.port_int
+		 print_ast_link (fst p.Ast.port_lnk)
+
+let print_ast_agent f ((ag_na,_),l) =
+  Format.fprintf f "%s(%a)" ag_na
+		 (Pp.list (fun f -> Format.fprintf f ",") print_ast_port) l
+
+let print_ast_mix f m = Pp.list Pp.comma print_ast_agent f m
+
 let rec print_ast_alg f = function
   | Ast.EMAX -> Format.fprintf f "[Emax]"
   | Ast.PLOTNUM -> Format.fprintf f "[p]"
@@ -5,7 +26,7 @@ let rec print_ast_alg f = function
   | Ast.CONST n -> Nbr.print f n
   | Ast.OBS_VAR lab -> Format.fprintf f "'%s'" lab
   | Ast.KAPPA_INSTANCE ast ->
-     Format.pp_print_string f "|#no printer for mixture, sorry#|"
+     Format.fprintf f "|%a|" print_ast_mix ast
   | Ast.TOKEN_ID tk -> Format.fprintf f "|%s|" tk
   | Ast.STATE_ALG_OP op -> Term.print_state_alg_op f op
   | Ast.BIN_ALG_OP (op, (a,_), (b,_)) ->
@@ -41,7 +62,7 @@ type ('a,'b) contractible = NO of 'a
 			  | YES of 'b
 
 let rec compile_alg ?label var_map tk_map ?max_allowed_var
-		    (fr_mix_id,mix_l as mixs) (alg,(beg_pos,_ as pos)) =
+		    (fr_mix_id,mix_l as mixs) (alg,pos) =
   let rec_call mixs x =
     match compile_alg var_map tk_map ?max_allowed_var mixs x with
     | (mixs', (ALG_VAR _ | TOKEN_ID _ | UN_ALG_OP _ | STATE_ALG_OP _
@@ -58,29 +79,41 @@ let rec compile_alg ?label var_map tk_map ?max_allowed_var
      let i =
        try Mods.StringMap.find lab var_map with
        | Not_found ->
-	  raise (ExceptionDefn.Semantics_Error
-		   (Tools.pos_of_lex_pos beg_pos,
-		    lab ^" is not a declared variable"))
+	  raise (ExceptionDefn.Malformed_Decl
+		   (lab ^" is not a declared variable",pos))
      in
      let () = match max_allowed_var with
        | Some j when j < i ->
-	  raise (ExceptionDefn.Semantics_Error
-		   (Tools.pos_of_lex_pos beg_pos,
-		    "Reference to not yet defined '"^lab ^"' is forbidden."))
+	  raise (ExceptionDefn.Malformed_Decl
+		   ("Reference to not yet defined '"^lab ^"' is forbidden.",
+		    pos))
        | None | Some _ -> ()
      in(mixs,(ALG_VAR i,pos))
   | Ast.TOKEN_ID tk_nme ->
      let i =
        try Mods.StringMap.find tk_nme tk_map
        with Not_found ->
-	 raise (ExceptionDefn.Semantics_Error
-		  (Tools.pos_of_lex_pos beg_pos,tk_nme ^ " is not a declared token"))
+	 raise (ExceptionDefn.Malformed_Decl
+		  (tk_nme ^ " is not a declared token",pos))
      in (mixs,(TOKEN_ID i,pos))
   | Ast.STATE_ALG_OP (op) -> (mixs,(STATE_ALG_OP (op),pos))
   | Ast.CONST n -> (mixs,(CONST n,pos))
-  | Ast.EMAX -> (mixs,(CONST (Nbr.getMaxEventValue ()),pos))
-  | Ast.TMAX -> (mixs,(CONST (Nbr.getMaxTimeValue ()),pos))
-  | Ast.PLOTNUM -> (mixs,(CONST (Nbr.getPointNumberValue ()),pos))
+  | Ast.EMAX ->
+     let getMaxEventValue =
+       match !Parameter.maxEventValue with
+       | Some n -> Nbr.I n
+       | None -> Format.eprintf "[emax] constant is evaluated to infinity@.";
+		 Nbr.F infinity in
+     (mixs,(CONST getMaxEventValue,pos))
+  | Ast.TMAX ->
+     let getMaxTimeValue = match !Parameter.maxTimeValue with
+       | Some t -> Nbr.F t
+       | None -> Format.eprintf "[tmax] constant is evaluated to infinity@.";
+		 Nbr.F infinity in
+     (mixs,(CONST getMaxTimeValue,pos))
+  | Ast.PLOTNUM ->
+	  let getPointNumberValue = Nbr.I !Parameter.pointNumberValue in
+	  (mixs,(CONST getPointNumberValue,pos))
   | Ast.BIN_ALG_OP (op, (a,pos1), (b,pos2)) ->
      begin match rec_call mixs (a,pos1) with
 	   | (mixs',YES n1) ->
@@ -116,13 +149,14 @@ let rec compile_bool var_map tk_map mixs = function
 	   | (_,(Ast.FALSE,_)), Term.AND -> (mixs,(Ast.FALSE,pos))
 	   | (_,(Ast.TRUE,_)), Term.AND
 	   | (_,(Ast.FALSE,_)), Term.OR -> compile_bool var_map tk_map mixs b
-	   | (mixs',a' as out1),_ ->
+	   | (mixs',((Ast.BOOL_OP _ | Ast.COMPARE_OP _) ,_ as a') as out1),_ ->
 	      match compile_bool var_map tk_map mixs' b, op with
 	      | (_,(Ast.TRUE,_)), Term.OR -> (mixs,(Ast.TRUE,pos))
 	      | (_,(Ast.FALSE,_)), Term.AND -> (mixs,(Ast.FALSE,pos))
 	      | (_,(Ast.TRUE,_)), Term.AND
 	      | (_,(Ast.FALSE,_)), Term.OR -> out1
-	      | (mixs'',b'),_ -> (mixs'',(Ast.BOOL_OP (op,a',b'),pos))
+	      | (mixs'',((Ast.BOOL_OP _ | Ast.COMPARE_OP _) ,_ as b')),_ ->
+		 (mixs'',(Ast.BOOL_OP (op,a',b'),pos))
      end
   | Ast.COMPARE_OP (op,a,b),pos ->
      let (mixs',a') = compile_alg var_map tk_map mixs a in
@@ -135,8 +169,8 @@ let rec compile_bool var_map tk_map mixs = function
 
 let add_dep el s = Term.DepSet.add el s
 let rec aux_dep s = function
-  | BIN_ALG_OP (op, (a,_), (b,_)) -> aux_dep (aux_dep s a) b
-  | UN_ALG_OP (op, (a,_)) -> aux_dep s a
+  | BIN_ALG_OP (_, (a,_), (b,_)) -> aux_dep (aux_dep s a) b
+  | UN_ALG_OP (_, (a,_)) -> aux_dep s a
   | STATE_ALG_OP op -> add_dep (Term.dep_of_state_alg_op op) s
   | ALG_VAR i -> add_dep (Term.ALG i) s
   | KAPPA_INSTANCE i -> add_dep (Term.KAPPA i) s

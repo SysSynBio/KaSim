@@ -4,7 +4,7 @@
   * Jérôme Feret, projet Abstraction, INRIA Paris-Rocquencourt
   * 
   * Creation: March, the 7th 2011
-  * Last modification: March, the 23rd 2011
+  * Last modification: February, the 25th 2015
   * * 
   * Labels to be associated with influence relations
   *  
@@ -32,11 +32,15 @@ module Int_labels =
   let label_of_int _ error i = error,i  
                   
   let to_string parameter error i = 
-     error,string_of_int i
+    if i < 0 then 
+     error,(string_of_int (-i-1))^"*"
+    else 
+      error,string_of_int i 
+
       
   let dump h error i = 
     let error,s = to_string h error i  in 
-    let _ = Printf.fprintf h.Remanent_parameters_sig.log "%s" s in 
+    let _ = Printf.fprintf (Remanent_parameters.get_log h) "%s" s in 
       error
     
 end:Labels)
@@ -50,8 +54,9 @@ sig
   val label_of_int: Remanent_parameters_sig.parameters -> Exception.method_handler -> int -> Exception.method_handler * label  
   val empty: label_set
   val empty_couple: label_set_couple   
+  val is_empty_couple: label_set_couple -> bool 
   val add_set:     Remanent_parameters_sig.parameters -> Exception.method_handler -> label -> label_set -> Exception.method_handler * label_set 
-  val add_couple:  Remanent_parameters_sig.parameters -> Exception.method_handler -> label_set -> label_set -> label_set_couple -> Exception.method_handler * label_set_couple
+  val add_couple:  Remanent_parameters_sig.parameters -> Exception.method_handler -> bool -> label_set -> label_set -> label_set_couple -> Exception.method_handler * label_set_couple
   val dump:        Remanent_parameters_sig.parameters -> Exception.method_handler -> Cckappa_sig.kappa_handler -> label_set  -> Exception.method_handler 
   val dump_couple: Remanent_parameters_sig.parameters -> Exception.method_handler -> Cckappa_sig.kappa_handler ->label_set_couple -> Exception.method_handler 
   val to_string :  Remanent_parameters_sig.parameters -> Exception.method_handler -> Cckappa_sig.kappa_handler ->label_set -> Exception.method_handler * string list 
@@ -67,8 +72,9 @@ module Empty =
   let label_of_int handler error _ = error,() 
   let empty = () 
   let empty_couple = ()
+  let is_empty_couple _ = true
   let add_set _ error _ _ = error,() 
-  let add_couple _ error _ _ _ = error,() 
+  let add_couple _ error _ _ _ _ = error,() 
   let dump _ error _ _ = error 
   let to_string _ error _ _ = error,[]
   let dump_couple _ error _ _ = error 
@@ -87,13 +93,18 @@ module Extensive =
       let label_of_int = L.label_of_int
       let empty = Set.empty_set   
       let empty_couple = Pair_Set.empty_set  
+      let is_empty_couple = Pair_Set.is_empty_set
       let add_set = Set.add_set
-      let add_couple remanent error a b sol = 
+      let add_couple remanent error bool a b sol = 
         Set.fold_set 
           (fun a (error,sol) -> 
             Set.fold_set
               (fun b (error,sol) -> 
-                Pair_Set.add_set remanent error (a,b) sol
+		if not bool && a=b 
+		then 
+		  error,sol 
+		else 
+                  Pair_Set.add_set remanent error (a,b) sol
               )  
               b 
               (error,sol)
@@ -103,7 +114,7 @@ module Extensive =
     
         
       let dump parameter error handler  a =
-        let _ = Printf.fprintf parameter.Remanent_parameters_sig.log "[" in
+        let _ = Printf.fprintf (Remanent_parameters.get_log parameter) "[" in
         let _,error  = 
           Set.fold_set 
             (fun a (bool,error) -> 
@@ -111,19 +122,19 @@ module Extensive =
               let _ = 
                 if bool 
                 then 
-                   Printf.fprintf parameter.Remanent_parameters_sig.log ";%s" a'  
+                   Printf.fprintf (Remanent_parameters.get_log parameter) ";%s" a'  
                 else 
-                   Printf.fprintf parameter.Remanent_parameters_sig.log "%s" a' 
+                   Printf.fprintf (Remanent_parameters.get_log parameter) "%s" a' 
               in 
                 true,error
             )
             a 
             (false,error)
         in 
-        let _ = Printf.fprintf parameter.Remanent_parameters_sig.log "]" in 
+        let _ = Printf.fprintf (Remanent_parameters.get_log parameter) "]" in 
           error
   
-        let to_string parameter error handler a = 
+      let to_string parameter error handler a =
           let sol = ["["] in  
           let _,sol,error = 
             Set.fold_set 
@@ -151,9 +162,9 @@ module Extensive =
               let _ = 
                 if bool 
                 then 
-                   Printf.fprintf parameter.Remanent_parameters_sig.log ";[%s->%s]" a' b' 
+                   Printf.fprintf (Remanent_parameters.get_log parameter) ";[%s->%s]" a' b' 
                 else 
-                   Printf.fprintf parameter.Remanent_parameters_sig.log "[%s->%s]" a' b'
+                   Printf.fprintf (Remanent_parameters.get_log parameter) "[%s->%s]" a' b'
               in 
                 true,error
             )
@@ -171,8 +182,8 @@ module Extensive =
                  let error,b' = L.to_string parameter error b in 
                  let _ = 
                     if bool 
-                    then 
-                      (";["^a'^"->"^b'^"]")::sol  
+                    then
+                      (";["^a'^"->"^b'^"]")::sol 
                     else 
                       ("["^a'^"->"^b'^"]")::sol               
                  in true,sol,error)
@@ -194,11 +205,12 @@ module Implicit =
       let label_of_int = L.label_of_int
       let empty = Set.empty_set 
       let empty_couple  = []
+      let is_empty_couple x = x=[]
       let add_set = Set.add_set
-      let add_couple remanent error a b sol = error,(a,b)::sol 
+      let add_couple remanent error bool a b sol = error,(a,b)::sol 
         
       let dump parameter error handler a =
-        let _ = Printf.fprintf parameter.Remanent_parameters_sig.log "[" in
+        let _ = Printf.fprintf (Remanent_parameters.get_log parameter) "[" in
         let _ = 
           Set.fold_set 
                 (fun x bool ->
@@ -206,14 +218,14 @@ module Implicit =
                      let _ = 
                          if bool 
                          then 
-                            Printf.fprintf parameter.Remanent_parameters_sig.log ";%s" x'  
+                            Printf.fprintf (Remanent_parameters.get_log parameter) ";%s" x'  
                          else 
-                            Printf.fprintf parameter.Remanent_parameters_sig.log "%s" x' 
+                            Printf.fprintf (Remanent_parameters.get_log parameter) "%s" x' 
                      in true)
                        a 
                 false
         in 
-        let _ = Printf.fprintf parameter.Remanent_parameters_sig.log "]" in 
+        let _ = Printf.fprintf (Remanent_parameters.get_log parameter) "]" in 
           error
   
     let to_string parameter error handler a = 
@@ -248,9 +260,9 @@ module Implicit =
                           let _ = 
                             if bool 
                             then 
-                              Printf.fprintf parameter.Remanent_parameters_sig.log ";[%s->%s]" x' y' 
+                              Printf.fprintf (Remanent_parameters.get_log parameter) ";[%s->%s]" x' y' 
                             else 
-                              Printf.fprintf parameter.Remanent_parameters_sig.log "[%s->%s]" x' y'
+                              Printf.fprintf (Remanent_parameters.get_log parameter) "[%s->%s]" x' y'
                           in true)
                       b 
                       bool)
@@ -261,7 +273,7 @@ module Implicit =
         in 
           error
   
-      let to_string_couple parameter error handler a = 
+      let to_string_couple parameter error handler a =
         let sol = ["["] in  
         let _,sol = 
           List.fold_left

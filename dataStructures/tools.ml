@@ -4,16 +4,10 @@ let ln (_,i,_) = i
 let cn (_,_,j) = j
 let fn (n,_,_) = n
 
-let pos_of_lex_pos pos =
-  (pos.Lexing.pos_fname, pos.Lexing.pos_lnum,
-   pos.Lexing.pos_cnum - pos.Lexing.pos_bol)
-
 let no_pos = ("",-1,-1)
 
-let string_of_pos (n,i,j) =
-  ("(in "^n^") line "^(string_of_int i)^", char "^(string_of_int j)^": ")
-
 let pow x n =
+  assert (n >= 0);
   let rec aux x n acc =
     if n = 0 then acc
     else
@@ -22,6 +16,7 @@ let pow x n =
   aux x n 1
 
 let pow64 x n =
+  assert (n >= Int64.zero);
   let rec aux x n acc =
     if n = Int64.zero then acc
     else
@@ -54,18 +49,60 @@ let read_input () =
 	with
 		| Stream.Failure -> invalid_arg "Tools.Read_input: cannot read stream"
 
-let list_of_string str =
-	let stream = Stream.of_string str in
-	let rec parse stream acc cont =
-		try
-		match Stream.next stream with
-			| ' ' | '\t' -> parse stream "" (acc::cont)
-				| '\n' -> (acc::cont)
-			| c -> parse stream  (Printf.sprintf "%s%c" acc c ) cont
-		with Stream.Failure -> (acc::cont)
-	in
-	parse stream "" []
+let option_map f = function
+  | Some x -> Some (f x)
+  | None -> None
 
+let rec list_last = function
+  | [] -> failwith "list_last"
+  | [ x ] -> x
+  | _ :: l -> list_last l
+
+let rec list_smart_filter f = function
+  | t :: q as l ->
+     let q' = list_smart_filter f q in
+     if f t then if q == q' then l else t::q' else q'
+  | l -> l
+
+let rec list_smart_map f = function
+  | t :: q as l ->
+     let q' = list_smart_map f q in
+     let t' = f t in
+     if t' == t && q' == q then l else t' :: q'
+  | l -> l
+
+let list_exists_uniq f l =
+  let rec second = function
+    | [] -> true
+    | h :: t -> not (f h) && second t in
+  let rec first = function
+    | [] -> false
+    | h :: t -> if f h then second t else first t in
+  first l
+
+let rec list_rev_map_append f l acc =
+  match l with
+  | [] -> acc
+  | h :: t -> list_rev_map_append f t (f h::acc)
+
+let rec list_map_flatten f = function (* list_bind *)
+  | [] -> []
+  | h :: t -> List.append (f h) (list_map_flatten f t)
+(*  List.rev
+    (List.fold_left (fun x y -> List.rev_append y x) [] (List.rev_map f l))
+ *)
+
+let rec list_fold_right_map f x = function
+  | [] -> (x,[])
+  | h :: t ->
+     let (x',t') = list_fold_right_map f x t in
+     let (x'', h') = f x' h in (x'', h'::t')
+
+let rec list_fold_left2 f x l1 l2 =
+  match l1, l2 with
+  | [], [] -> x
+  | [], _ :: _ | _ :: _, [] -> raise (Invalid_argument "list_fold_left2")
+  | h1::t1, h2::t2 -> list_fold_left2 f (f x h1 h2) t1 t2
 
 let array_fold_left_mapi f x a =
   let y = ref x in
@@ -90,41 +127,20 @@ let array_map_of_list f l =
      let () = fill 1 ans l in
      ans
 
+let array_fold_lefti f x a =
+  let y = ref x in
+  let () = Array.iteri (fun i e -> y := f i !y e) a in
+  !y
+
+let array_fold_left2i  f x a1 a2 =
+  let l = Array.length a1 in
+  if l <> Array.length a2 then raise (Invalid_argument "array_fold_left2i")
+  else array_fold_lefti (fun i x e -> f i x e a2.(i)) x a1
+
+let array_filter f a =
+  array_fold_lefti (fun i acc x -> if f i x then i :: acc else acc) [] a
+
 let iteri f i =
   let rec aux j =
   if j < i then let () = f j in aux (succ j)
   in aux 0
-
-let kasim_path f =
-  if Filename.is_relative f && Filename.dirname f = Filename.current_dir_name
-  then Filename.concat !Parameter.outputDirName f
-  else f
-
-let kasim_open_out f =
-  open_out (kasim_path f)
-
-let find_available_name name ext =
-  let base = try Filename.chop_extension name
-	     with Invalid_argument _ -> name in
-  if Sys.file_exists (base^"."^ext) then
-    let v = ref 0 in
-    let () =
-      while Sys.file_exists (base^"~"^(string_of_int !v)^"."^ext)
-      do incr v; done
-    in base^"~"^(string_of_int !v)^"."^ext
-  else
-    (base^"."^ext)
-
-let open_out_fresh_filename base_name concat_list ext =
-  let tmp_name =
-    kasim_path (try Filename.chop_extension base_name
-		with Invalid_argument _ -> base_name) in
-  let base_name = String.concat "_" (tmp_name::concat_list) in
-  open_out (find_available_name base_name ext)
-
-let mk_dir_r d =
-  let rec aux d =
-    let par = Filename.dirname d in
-    let () = if not (Sys.file_exists par) then aux par in
-    Unix.mkdir d 0o775 in
-  Unix.handle_unix_error aux d

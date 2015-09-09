@@ -23,7 +23,7 @@ let is_empty node = node.name = -1
 
 let get_lifts u i =
   try u.interface.(i).dep
-  with Invalid_argument msg ->
+  with Invalid_argument _msg ->
     invalid_arg (Format.sprintf
 		   "Node.get_lifts: node %d has no site %d" (name u) i)
 
@@ -49,22 +49,17 @@ let label node env =
   let str_intf =
     fold_interface
       (fun i port cont ->
-       let s_i = Environment.site_of_id node.name i env in
-       if (s_i = "_") then cont
+       if i = 0 then cont
        else
 	 let (int_state,_) = port.status in
-	 match int_state with
-	 | None -> cont
-	 | Some x ->
-	    let s_int = ("~"^(Environment.state_of_id node.name i x env))
-	    in
-	    (Printf.sprintf "%s%s" s_i s_int)::cont
+	 (Format.asprintf
+	    "%a" (Environment.print_site_state env node.name i) int_state)::cont
       ) node []
   in
   match str_intf with
-  | [] -> Environment.name node.name env
+  | [] -> Format.asprintf "%a" (Environment.print_agent env) node.name
   | _ ->
-     Format.asprintf "%s(@[<h>%a@])" (Environment.name node.name env)
+     Format.asprintf "%a(@[<h>%a@])" (Environment.print_agent env) node.name
 		     (Pp.list Pp.space Format.pp_print_string)
 		     (List.rev str_intf)
 
@@ -86,16 +81,11 @@ let to_string with_detail (hsh_lnk,fresh) node env =
   let intf_l,fresh' =
     fold_interface
       (fun i port (cont,fresh) ->
-       let s_i = Environment.site_of_id node.name i env in
-       if not with_detail && (s_i = "_")
+       if not with_detail && (i = 0)
        then (cont,fresh) (*Skipping existential port*)
        else
 	 let (int_state,lnk_state) = port.status in
 	 let (lifts_int,lifts_lnk) = port.dep in
-	 let s_int =
-	   match int_state with
-	     None -> ""
-	   | Some x -> ("~"^(Environment.state_of_id node.name i x env)) in
 	 let s_lnk,fresh =
 	   match lnk_state with
 	   | FPtr (u',j) ->
@@ -113,20 +103,24 @@ let to_string with_detail (hsh_lnk,fresh) node env =
 	   Format.fprintf f "(%d,%d)" m c in
 	 ((if with_detail then
 	     Format.asprintf
-	       "%s%s@[<h>%a@]%s@[<h>%a@]" s_i s_int
+	       "%a@[<h>%a@]%s@[<h>%a@]"
+	       (Environment.print_site_state env node.name i) int_state
 	       (Pp.set LiftSet.elements Pp.comma pp_lift) lifts_int s_lnk
 	       (Pp.set LiftSet.elements Pp.comma pp_lift) lifts_lnk
 	   else
-	     Format.sprintf "%s%s%s" s_i s_int s_lnk)::cont,fresh)
+	     Format.asprintf
+	       "%a%s" (Environment.print_site_state env node.name i) int_state
+	       s_lnk)::cont,fresh)
       ) node ([],fresh)
   in
   let s_addr = try string_of_int (get_address node) with Not_found -> "na" in
   if with_detail then
-    (Format.asprintf "%s_%s:[@[<h>%a@]]" (Environment.name node.name env) s_addr
+    (Format.asprintf "%a_%s:[@[<h>%a@]]" (Environment.print_agent env) node.name
+		     s_addr
 		     (Pp.list Pp.comma Format.pp_print_string) (List.rev intf_l)
     ,fresh')
   else
-    (Format.asprintf "%s(@[<h>%a@])" (Environment.name node.name env)
+    (Format.asprintf "%a(@[<h>%a@])" (Environment.print_agent env) node.name
 		     (Pp.list Pp.comma Format.pp_print_string) (List.rev intf_l)
     ,fresh')
 
@@ -179,8 +173,9 @@ exception TooBig
 let bit_encode node env =
   try
     let tot_offset = ref 0 in
-    let sign = Environment.get_sig (name node) env in
-    let max_val site_id = Signature.internal_states_number site_id sign in
+    let max_val site_id =
+      Signature.internal_states_number (name node) site_id
+env.Environment.signatures in
     let bit_rep =
       fold_status
 	(fun site_id (int,lnk) bit_rep ->
@@ -236,16 +231,12 @@ let create ?with_interface name_id env =
 	(*{name="%" ; interface = Array.make 0 {status = (None,Null) ;
  dep = (LiftSet.create 0,LiftSet.create 0)}; address=None ; species_id = None}*)
     else
-      let sign =
-	try Environment.get_sig name_id env
-	with Not_found -> invalid_arg "Node.create 1"
-      in
-      let size = Signature.arity sign in
+      let size = Signature.arity env.Environment.signatures name_id in
       let intf =
 	Array.init
 	  size
 	  (fun i ->
-	   let def_int = Signature.default_num_value i sign in
+	   let def_int = Environment.default_state name_id i env in
 	   {status = (def_int,Null) ;
 	    dep = (LiftSet.create !Parameter.defaultLiftSetSize,
 		   LiftSet.create !Parameter.defaultLiftSetSize)}
@@ -271,13 +262,13 @@ let create ?with_interface name_id env =
 (*Tests whether status of port i of node n is compatible with (int,lnk)
 @raises False if not otherwise returns completes*)
 (*the list port_list with (0,i) if i is int-tested or (1,i) if i is lnk-tested*)
-let test n i int lnk port_list =
+let test err_fmt n i int lnk port_list =
   let intf_n = interface n in
   let (state,link) =
     try intf_n.(i).status
     with exn ->
-      (Debug.tag (Printf.sprintf "Node %d has no site %d" (name n) i)
-      ; raise exn) in
+      let () = Format.fprintf err_fmt "Node %d has no site %d@." (name n) i in
+      raise exn in
   let port_list =
     match int with
     | None -> port_list
@@ -291,14 +282,16 @@ let test n i int lnk port_list =
   | (Mixture.BND, Ptr _ | Mixture.FREE, Null ) -> (1,i)::port_list
   | Mixture.TYPE (sid,nme), Ptr (u,j) when (name u = nme) && (j = sid) ->
      (1,i)::port_list
-  | _, _ -> raise False
+  | Mixture.TYPE _, (Null|Ptr _) -> raise False
+  | Mixture.FREE, Ptr _ -> raise False
+  | Mixture.BND, Null -> raise False
 
 let follow u i =
   let intf_u = interface u in
   let (_,lnk) = intf_u.(i).status in
   match lnk with
   | Ptr (v,j) -> Some (v,j)
-  | _ -> None
+  | (Null | FPtr _) -> None
 
 module NodeHeap =
   MemoryManagement.Make (struct

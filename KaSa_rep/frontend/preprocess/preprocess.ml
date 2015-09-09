@@ -4,7 +4,7 @@
   * Jérôme Feret, projet Abstraction/Antique, INRIA Paris-Rocquencourt
   * 
   * Creation: 12/08/2010
-  * Last modification: 02/01/2015
+  * Last modification: 04/02/2015
   * * 
   * Translation from kASim ast to OpenKappa internal representations, and linkage
   *  
@@ -56,16 +56,19 @@ let empty_rule handler error  =
 
 let empty_e_rule handler error = 
     let error,rule = empty_rule handler error in 
-    {Cckappa_sig.e_rule_label= None ;
-     Cckappa_sig.e_rule_initial_direction = Ckappa_sig.Direct ;
-     Cckappa_sig.e_rule_rule = {
-       Ckappa_sig.lhs = Ckappa_sig.EMPTY_MIX ; 
-       Ckappa_sig.arrow = Ast.RAR (*empty_pos*);
-       Ckappa_sig.rhs = Ckappa_sig.EMPTY_MIX; 
-       Ckappa_sig.k_def = (Ast.CONST (Nbr.F 0.),(Lexing.dummy_pos,Lexing.dummy_pos));
-(*       Ckappa_sig.k_un_radius = None ; *)
-       Ckappa_sig.k_un = None};
-     Cckappa_sig.e_rule_c_rule = rule }
+    {
+      Cckappa_sig.e_rule_label= None ;
+      Cckappa_sig.e_rule_label_dot = None ;
+      Cckappa_sig.e_rule_initial_direction = Ckappa_sig.Direct ;
+      Cckappa_sig.e_rule_rule = 
+	{
+	  Ckappa_sig.lhs = Ckappa_sig.EMPTY_MIX ; 
+	  Ckappa_sig.arrow = Ast.RAR (*empty_pos*);
+	  Ckappa_sig.rhs = Ckappa_sig.EMPTY_MIX; 
+	  Ckappa_sig.k_def = (Ast.CONST (Nbr.F 0.),(Lexing.dummy_pos,Lexing.dummy_pos));
+       (*       Ckappa_sig.k_un_radius = None ; *)
+	  Ckappa_sig.k_un = None};
+      Cckappa_sig.e_rule_c_rule = rule }
 
 let rename_rule_rlhs handler error id_agent tab =
   let error,agent = 
@@ -470,40 +473,50 @@ let translate_mixture parameters error handler mixture =
        []
    in 
    l 
-   
- 
+
  let set_bound_sites parameters error k ag set = 
    Cckappa_sig.Site_map_and_set.fold_map 
      (fun site state (error,set) -> 
         if state.Cckappa_sig.site_free = Some true 
         then error,set 
-        else Cckappa_sig.Address_map_and_set.add_set parameters error {Cckappa_sig.agent_index=k; Cckappa_sig.agent_type=ag.Cckappa_sig.agent_name;Cckappa_sig.site=site} set)
+        else Cckappa_sig.Address_map_and_set.add_set parameters error
+          {
+            Cckappa_sig.agent_index = k;
+            Cckappa_sig.agent_type = ag.Cckappa_sig.agent_name;
+            Cckappa_sig.site = site}
+          set)
      ag.Cckappa_sig.agent_interface
      (error,set)
-   
+
  let set_released_sites parameters error k ag ag' set = 
    Cckappa_sig.Site_map_and_set.fold2_map parameters error  
-     (fun site state state' (error,set) -> 
+     (fun site state state' (error,set) ->
        if state.Cckappa_sig.site_free  = state'.Cckappa_sig.site_free
-	  || state.Cckappa_sig.site_free = Some true
-       then error,set
-         else Cckappa_sig.Address_map_and_set.add_set parameters error {Cckappa_sig.agent_index=k; Cckappa_sig.agent_type=ag.Cckappa_sig.agent_name;Cckappa_sig.site=site} set)
-     (fun site state _ -> 
+       || state.Cckappa_sig.site_free = Some true
+       then error, set
+       else Cckappa_sig.Address_map_and_set.add_set parameters error
+         {
+           Cckappa_sig.agent_index = k;
+           Cckappa_sig.agent_type = ag.Cckappa_sig.agent_name;
+           Cckappa_sig.site = site} set)
+     (fun site state _ ->
        warn parameters error (Some "line 514") Exit set)
      (fun site state (error,set) -> 
-        if state.Cckappa_sig.site_free = Some true 
-	then 
-	  Cckappa_sig.Address_map_and_set.add_set parameters error {Cckappa_sig.agent_index=k; Cckappa_sig.agent_type=ag.Cckappa_sig.agent_name;Cckappa_sig.site=site} set
-	else error,set)
-   ag.Cckappa_sig.agent_interface ag'.Cckappa_sig.agent_interface set
-   
-   
+       if state.Cckappa_sig.site_free = Some true 
+       then 
+	 Cckappa_sig.Address_map_and_set.add_set parameters error
+           {
+             Cckappa_sig.agent_index = k;
+             Cckappa_sig.agent_type = ag.Cckappa_sig.agent_name;
+             Cckappa_sig.site = site} set
+       else error,set)
+     ag.Cckappa_sig.agent_interface ag'.Cckappa_sig.agent_interface set
+
  let equ_port s1 s2 = 
    s1.Cckappa_sig.site_name = s2.Cckappa_sig.site_name 
    && s1.Cckappa_sig.site_free = s2.Cckappa_sig.site_free 
-   && s1.Cckappa_sig.site_state = s2.Cckappa_sig.site_state 
+     && s1.Cckappa_sig.site_state = s2.Cckappa_sig.site_state 
 
-   
  let translate_rule parameters error handler rule = 
    let label,((direction,rule),position) = rule in 
    let error,c_rule_lhs = translate_mixture parameters error handler rule.Ckappa_sig.lhs in 
@@ -549,30 +562,30 @@ let translate_mixture parameters error handler mixture =
                             )
                end 
            | Some Cckappa_sig.Ghost, Some Cckappa_sig.Agent ragk -> (*creation*)
-               begin 
-                let agent_type = ragk.Cckappa_sig.agent_name in 
-                let error,direct = Int_storage.Quick_Nearly_inf_Imperatif.set parameters error k (Cckappa_sig.upgrade_some_interface ragk) direct in  
-                let error,rbondk = Int_storage.Quick_Nearly_inf_Imperatif.unsafe_get parameters error k c_rule_rhs.Cckappa_sig.bonds in  
-                let rbondk  = 
-                  match rbondk with 
-                     | None  -> Cckappa_sig.Site_map_and_set.empty_map
-                     | Some a -> a 
-                in 
-                let lbondk = Cckappa_sig.Site_map_and_set.empty_map in   
-                   error,
-                   (
-                      direct,
-                      reverse,
-                      {
-                        actions 
-                         with Cckappa_sig.creation = (k,ragk.Cckappa_sig.agent_name)::actions.Cckappa_sig.creation
-                      },
-                      half_release_set,
-                      agent_type,
-                      lbondk, 
-                      rbondk
-                             )
-               end 
+             begin 
+               let agent_type = ragk.Cckappa_sig.agent_name in 
+               let error,direct = Int_storage.Quick_Nearly_inf_Imperatif.set parameters error k (Cckappa_sig.upgrade_some_interface ragk) direct in  
+               let error,rbondk = Int_storage.Quick_Nearly_inf_Imperatif.unsafe_get parameters error k c_rule_rhs.Cckappa_sig.bonds in  
+               let rbondk  = 
+                 match rbondk with 
+                   | None  -> Cckappa_sig.Site_map_and_set.empty_map
+                   | Some a -> a 
+               in 
+               let lbondk = Cckappa_sig.Site_map_and_set.empty_map in   
+               error,
+               (
+                 direct,
+                 reverse,
+                 {
+                   actions 
+                  with Cckappa_sig.creation = (k,ragk.Cckappa_sig.agent_name)::actions.Cckappa_sig.creation
+                 },
+                 half_release_set,
+                 agent_type,
+                 lbondk, 
+                 rbondk
+               )
+             end 
            | Some Cckappa_sig.Agent lagk,Some Cckappa_sig.Agent ragk -> 
              let agent_type = lagk.Cckappa_sig.agent_name in 
              let error,ldiff,rdiff = Cckappa_sig.Site_map_and_set.diff_map_pred parameters error equ_port lagk.Cckappa_sig.agent_interface ragk.Cckappa_sig.agent_interface in 
@@ -651,8 +664,18 @@ let translate_mixture parameters error handler mixture =
        (List.rev list) 
    in 
    let actions = {actions with Cckappa_sig.half_break = list} in 
+   let error,label_dot = 
+     match 
+       label 
+     with 
+     | None -> error,None 
+     | Some (string,pos) -> 
+       let error,s = Tools_kasa.make_id_compatible_with_dot_format parameters error string in
+       error,Some(s,pos)
+   in 
    error, 
     ({Cckappa_sig.e_rule_label = label;
+      Cckappa_sig.e_rule_label_dot = label_dot;
       Cckappa_sig.e_rule_initial_direction = direction; 
       Cckappa_sig.e_rule_rule = rule;
       Cckappa_sig.e_rule_c_rule = 
@@ -706,16 +729,19 @@ let translate_init parameters error handler init =
     Cckappa_sig.e_init_c_mixture = c_mixture ;
     Cckappa_sig.e_init_string_pos = a;
     Cckappa_sig.e_init_pos = c} 
-   | Ast.INIT_TOK _ -> 
-     warn parameters error (Some "line 708") Exit (raise Exit)
+   | Ast.INIT_TOK _ -> (*TO DO*)
+     let error,dft = Cckappa_sig.dummy_init parameters error in 
+     warn parameters error (Some "line 710, token are not supported yet") Exit dft 
 
 let alg_with_pos_map = Prepreprocess.map_with_pos Prepreprocess.alg_map
 
 let translate_var parameters error handler (a,b) =
    let error,b' = alg_with_pos_map  (lift (translate_mixture parameters) handler) error b in 
+   let error,a_dot = Tools_kasa.make_id_compatible_with_dot_format parameters error (fst a) in 
    error,
 	  {
 	    Cckappa_sig.e_id = fst a; 
+	    Cckappa_sig.e_id_dot = a_dot;
 	    Cckappa_sig.c_variable = fst b ;
 	    Cckappa_sig.e_variable = (a,b')}
    

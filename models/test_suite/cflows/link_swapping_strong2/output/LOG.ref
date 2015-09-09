@@ -1,0 +1,56 @@
++ Command line is: 'KaSim' '-i' 'link_swapping_strong2.ka' '-seed' '924556145' '-e' '300' '-d' 'output'
+Parsing link_swapping_strong2.ka...
+done
++ Initialized random number generator with seed 924556145
++ Compiling...
+	 -simulation parameters
+	 -agent signatures
+	 -variable declarations
+	 -initial conditions
+	 -rules
+	 -observables
+	 -perturbations
+	 Done
++ Analyzing non local patterns...
++ Building initial simulation state...
+	 -Counting initial local patterns...
+	 Done
+____________________________________________________________
+############################################################
++ Producing causal compressions
+	 - refining events
+	 - detecting siphons
+	 - cutting concurrent events
+	 - detecting pseudo inverse events
+	 - computing causal past of each observed events (50)
+
+____________________________________________________________
+############################################################
+Stats:
+ number of step   : 397
+ longest story    : 341
+ average length   : 174.16
+ geometric mean   : 201.573510164
+
+	 - causal & weak flow compression (50)
+
+____________________________________________________________
+############################################################
+
+
+
+	 - strong flow compression (18)
+
+____________________________________________________________
+############################################################
++ Pretty printing 18 weakly compressed flows
+
++ Pretty printing 1 strongly compressed flow
+
+Simulation ended (eff.: 0.473934, detail below)
+	Valid embedding but no longer unary when required: 0.000000
+	Valid embedding but not binary when required: 0.000000
+	Clashing instance: 0.000000
+	Lazy negative update: 1.000000
+	Lazy negative update of non local instances: 0.000000
+	Perturbation interrupting time advance: 0.000000

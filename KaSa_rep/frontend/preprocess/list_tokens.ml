@@ -4,7 +4,7 @@
   * Jérôme Feret, projet Abstraction/Antique, INRIA Paris-Rocquencourt
   * 
   * Creation: 2011, the 17th of January
-  * Last modification: 2014, the 9th of December
+  * Last modification: 2015, the 17th of February
   * * 
   * Number agents, sites, states in ckappa represenations
   *  
@@ -86,12 +86,12 @@ let declare_site create parameters make_site make_state (error,handler) agent_id
   let error,sites = Int_storage.Nearly_inf_Imperatif.get parameters error agent_id handler.Cckappa_sig.sites in
    match sites with 
     | None  -> warn parameters error (Some "line 87") Exit (handler,[],0)   
-     | Some sites -> 
+    | Some sites -> 
          let error,(bool,output) = Ckappa_sig.Dictionary_of_sites.allocate_bool parameters error Misc_sa.compare_unit site () Misc_sa.const_unit sites in 
         begin
            match output with 
-     | None -> warn parameters error (Some "line 92") Exit (handler,[],0) 
-             | Some (k,_,_,sites) -> 
+           | None -> warn parameters error (Some "line 92") Exit (handler,[],0) 
+           | Some (k,_,_,sites) -> 
                let error,(states_dic,dic_states,handler) = 
                if bool 
                then 
@@ -194,7 +194,8 @@ let scan_agent parameters (error,handler) agent =
                             | Ckappa_sig.LNK_VALUE (_,agent',site',_,_) 
                             | Ckappa_sig.LNK_TYPE ((agent',_),(site',_)) -> 
                ( let error,(handler,ag_id')   = declare_agent parameters error handler agent' in 
-                 let error,(handler,_,site_id') = declare_site_with_binding_states parameters (error,handler) ag_id' site' [] in  
+                 let error,(handler,_,site_id) = declare_site_with_binding_states parameters (error,handler) ag_id site_name [] in 
+		 let error,(handler,_,site_id') = declare_site_with_binding_states parameters (error,handler) ag_id' site' [] in  
                  let error,(handler,l1,site_id)  = declare_site_with_binding_states parameters (error,handler) ag_id site_name [Cckappa_sig.Lnk_type (ag_id',site_id')] in                   
                  let error,(handler,l2,site_id') = declare_site_with_binding_states parameters (error,handler) ag_id' site' [Cckappa_sig.Lnk_type (ag_id,site_id)] in
                  let error,handler = 
@@ -221,7 +222,12 @@ let rec scan_mixture parameters remanent mixture =
         let remanent = scan_agent parameters remanent agent in 
          scan_mixture parameters remanent mixture
 
-let rec scan_alg parameters remanent alg = 
+let scan_token parameters remanent alg = (*TO DO*)
+  let error,remanent = remanent in 
+  let error,remanent = warn parameters error (Some "line 221, scan_token is not implemented yet") Exit remanent in 
+  error,remanent 
+
+let rec scan_alg parameters remanent alg = (*TO DO*)
   remanent 
 
 let scan_initial_states parameters = 
@@ -230,15 +236,20 @@ let scan_initial_states parameters =
       match 
 	init_t
       with 
-	Ast.INIT_MIX((alg,pos),mixture) ->
-	  let remanent = scan_mixture parameters remanent mixture in 
-          scan_alg parameters remanent alg) 
+      | Ast.INIT_MIX((alg,pos),mixture) ->
+	let remanent = scan_mixture parameters remanent mixture in 
+          scan_alg parameters remanent alg
+      | Ast.INIT_TOK ((alg,pos),tok) -> 
+	let remanent = scan_token parameters remanent tok in 
+	 scan_alg parameters remanent alg)
     
 let scan_declarations parameters  = 
   List.fold_left 
     (fun remanent a -> scan_agent parameters remanent a) 
    
-let scan_observables parameters remanent variable = remanent 
+let scan_observables parameters remanent variable = (*TODO*) 
+  remanent 
+
 let scan_perts parameters = 
   List.fold_left 
     (fun remanent ((_,m,_),_) -> 
@@ -247,31 +258,28 @@ let scan_perts parameters =
               match m with 
               | Ast.INTRO (_,m,_) | Ast.DELETE(_,m,_) ->   
                 scan_mixture parameters remanent m 
-              | Ast.UPDATE _ | Ast.STOP _ | Ast.SNAPSHOT _  
+              | Ast.UPDATE _ | Ast.STOP _ | Ast.SNAPSHOT _ | Ast.PLOTENTRY
 	      | Ast.UPDATE_TOK _ | Ast.PRINT _ | Ast.CFLOW _ 
 	      | Ast.CFLOWOFF _ | Ast.FLUXOFF _ | Ast.FLUX _ -> remanent 
             ) remanent m)
               
 let scan_rules parameters a b =  
   let _ = 
-    if parameters.Remanent_parameters_sig.trace 
+    if Remanent_parameters.get_trace parameters
     then 
-      let _ = Printf.fprintf parameters.Remanent_parameters_sig.log  "Scan rules!\n" in ()  
+      let _ = Printf.fprintf (Remanent_parameters.get_log parameters) "Scan rules!\n" in ()  
   in 
     List.fold_left 
       (fun remanent (_,((_,rule),_)) -> scan_mixture parameters (scan_mixture parameters remanent rule.Ckappa_sig.lhs) rule.Ckappa_sig.rhs)
       a b
   
 let scan_compil parameters error compil =
-   let parameters =
-     {parameters with
-       Remanent_parameters_sig.trace =
-	 local_trace || parameters.Remanent_parameters_sig.trace} in
-   let remanent = empty_handler parameters error in 
-   let remanent = scan_initial_states parameters remanent compil.Ast.init in 
-   let remanent = scan_declarations parameters remanent compil.Ast.signatures  in 
-   let remanent = scan_observables parameters remanent compil.Ast.observables in 
-   let remanent = scan_perts parameters remanent compil.Ast.perturbations in 
-   let remanent = scan_rules parameters remanent compil.Ast.rules in
-     remanent 
+  let parameters = Remanent_parameters.set_trace parameters (local_trace || (Remanent_parameters.get_trace parameters)) in
+  let remanent = empty_handler parameters error in 
+  let remanent = scan_initial_states parameters remanent compil.Ast.init in 
+  let remanent = scan_declarations parameters remanent compil.Ast.signatures  in 
+  let remanent = scan_observables parameters remanent compil.Ast.observables in 
+  let remanent = scan_perts parameters remanent compil.Ast.perturbations in 
+  let remanent = scan_rules parameters remanent compil.Ast.rules in
+  remanent 
    

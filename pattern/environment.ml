@@ -2,7 +2,7 @@ open Mods
 open ExceptionDefn
 
 type t = {
-  signatures : Signature.t NamedDecls.t;
+  signatures : Signature.s;
   tokens : unit NamedDecls.t;
   algs : (Expr.alg_expr Term.with_pos) NamedDecls.t;
   perturbations : unit NamedDecls.t;
@@ -35,7 +35,7 @@ type t = {
 }
 
 let empty =
-	{signatures = NamedDecls.create [||] ;
+	{signatures = Signature.create [] ;
 	num_of_kappa = StringMap.empty ; 
 	kappa_of_num = IntMap.empty ;
 	num_of_rule = StringMap.empty ;
@@ -66,12 +66,12 @@ let init sigs tokens algs fresh_kappa =
 let get_desc file env =
   try snd (Hashtbl.find env.desc_table file)
   with Not_found ->
-       let d_chan = Tools.kasim_open_out file in
+       let d_chan = Kappa_files.open_out file in
     let d = Format.formatter_of_out_channel d_chan in
     (Hashtbl.add env.desc_table file (d_chan,d) ; d)
 
 let close_desc env =
-	Hashtbl.iter (fun file (d_chan,d) ->
+	Hashtbl.iter (fun _file (d_chan,d) ->
 		      let () = Format.pp_print_newline d () in
 		      close_out d_chan) env.desc_table
 
@@ -115,8 +115,9 @@ let declare_empty_lhs id env = {env with empty_lhs = IntSet.add id env.empty_lhs
 let is_empty_lhs id env = IntSet.mem id env.empty_lhs
 
 (*let log env = env.log*)
-let name i env = NamedDecls.elt_name env.signatures i
-let num_of_name nme env = StringMap.find nme env.signatures.NamedDecls.finder
+let print_agent env f i = Signature.print_agent env.signatures f i
+let num_of_name nme env =
+  Signature.num_of_agent nme env.signatures
 let num_of_kappa lab env = StringMap.find lab env.num_of_kappa 
 let kappa_of_num i env =  IntMap.find i env.kappa_of_num 
 let num_of_rule lab env = StringMap.find lab env.num_of_rule
@@ -129,7 +130,7 @@ let is_rule i env = IntSet.mem i env.rule_indices
 let num_of_alg s env = StringMap.find s env.algs.NamedDecls.finder
 let alg_of_num i env = fst env.algs.NamedDecls.decls.(i)
 
-let name_number env = NamedDecls.size env.signatures
+let name_number env = Signature.size env.signatures
 
 let add_dependencies dep dep' env =
   let set = try Term.DepMap.find dep env.dependencies
@@ -163,7 +164,7 @@ let declare_unary_rule rule_lbl id env =
 	match rule_lbl with
 		| None -> env
 		| Some (r_nme,pos) ->
-			if StringMap.mem r_nme env.num_of_unary_rule then raise (Semantics_Error (pos, ("Rule name "^r_nme^" is already used")))
+			if StringMap.mem r_nme env.num_of_unary_rule then raise (Malformed_Decl (("Rule name "^r_nme^" is already used"),pos))
 			else
 				let nr = StringMap.add r_nme id env.num_of_unary_rule
 				and rn = IntMap.add id r_nme env.unary_rule_of_num
@@ -171,23 +172,20 @@ let declare_unary_rule rule_lbl id env =
 					{env with num_of_unary_rule = nr ; unary_rule_of_num = rn}
 
 let id_of_site agent_name site_name env =
-  let n = StringMap.find agent_name env.signatures.NamedDecls.finder in
-  let (_,sign) = env.signatures.NamedDecls.decls.(n) in
-  Signature.num_of_site site_name sign
+  Signature.id_of_site (Term.with_dummy_pos agent_name)
+		       (Term.with_dummy_pos site_name) env.signatures
 
-let site_of_id agent_id site_id env =
-  let (_,sign) = env.signatures.NamedDecls.decls.(agent_id) in
-  Signature.site_of_num site_id sign
+let print_site env agent_id f site_id =
+  Signature.print_site env.signatures agent_id f site_id
 
 let id_of_state agent_name site_name state env =
-  let n = StringMap.find agent_name env.signatures.NamedDecls.finder in
-  let (_,sign) = env.signatures.NamedDecls.decls.(n) in
-  let site_id = Signature.num_of_site site_name sign in
-  Signature.num_of_internal_state site_id state sign
+  Signature.id_of_internal_state
+    (Term.with_dummy_pos agent_name)
+    (Term.with_dummy_pos site_name) state env.signatures
 
-let state_of_id agent_id id_site id_state env =
-  let (_,sign) = env.signatures.NamedDecls.decls.(agent_id) in
-  Signature.internal_state_of_num id_site id_state sign
+let print_site_state env agent_id id_site f id_state =
+  Signature.print_site_internal_state env.signatures
+				      agent_id id_site f id_state
 
 let num_of_token = fun str env ->
   StringMap.find str env.tokens.NamedDecls.finder
@@ -205,7 +203,7 @@ let declare_var_kappa ?(from_rule=false) label_pos_opt env =
 		(try let _ = num_of_alg label env in true with Not_found -> false)
 	in
 		if already_defined then
-		  raise (Malformed_Decl ((Printf.sprintf "Label '%s' already defined" label),pos))
+		  raise (Malformed_Decl ("Label "^label^"' already defined",pos))
 		else
 			let np = StringMap.add label env.fresh_kappa env.num_of_kappa
 			and pn = IntMap.add env.fresh_kappa label env.kappa_of_num
@@ -220,32 +218,15 @@ let declare_var_kappa ?(from_rule=false) label_pos_opt env =
 let get_sig agent_id env =
   if agent_id = -1
   then invalid_arg "Environment.get_sig: Empty agent has no signature"
-  else snd env.signatures.NamedDecls.decls.(agent_id)
+  else Signature.get env.signatures agent_id
 
-let check agent_name pos_ag site_name pos_site int_state env =
-  let agent_id =
-    try StringMap.find agent_name env.signatures.NamedDecls.finder
-    with Not_found ->
-      raise (Semantics_Error (pos_ag, "Undeclared agent \""^agent_name^"\""))
-  in
-  let sign = get_sig agent_id env in
-  let site_id =
-    try Signature.num_of_site site_name sign with
-      Not_found ->
-      raise (Semantics_Error
-	       (pos_site, "Site "^site_name^" is not consistent with \""^agent_name^"\"'s signature"))
-  in
+let check agent site_name int_state env =
   let _ =
-    try Signature.num_of_internal_state site_id int_state sign with
-      Not_found ->
-      raise (Semantics_Error
-	       (pos_site, "Internal state \""^int_state^"\" of site '"^site_name^"' is not consistent with \""^agent_name^"\"'s signature "))
-  in
+    Signature.id_of_internal_state agent site_name int_state env.signatures in
   ()
 
 let default_state name_id site_id env =
-  let (_,sign) = env.signatures.NamedDecls.decls.(name_id) in
-  Signature.default_num_value site_id sign
+  Signature.default_internal_state name_id site_id env.signatures
 
 let print_rule env f id = Format.fprintf f "%s" (rule_of_num id env)
 let print_alg env f id = Format.fprintf f "%s" (fst (alg_of_num id env))

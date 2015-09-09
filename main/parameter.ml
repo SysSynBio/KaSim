@@ -1,5 +1,6 @@
 (*Expert mode values*)
-let interrupt_on_exception = false 
+let batchmode = ref false
+let interrupt_on_exception = false
 let defaultExtArraySize = ref 5
 let defaultGraphSize = ref 5
 let defaultLiftSetSize = ref 5
@@ -46,6 +47,8 @@ let emacsMode = ref false
   let log_number_of_causal_flows = true 
 
 (*User definable values*)
+let tmp_var_name = ref ""
+let alg_var_overwrite : (string * Nbr.t) list ref = ref []
 let (maxEventValue:int option ref) = ref None
 let (maxTimeValue:float option ref) = ref None
 let (pointNumberValue:int ref) = ref 0
@@ -77,47 +80,10 @@ let cpuTime = ref 0.0
 let initSimTime () = cpuTime := Sys.time ()  
 
 (*Name convention*)
-let outputDirName = ref ""
-let snapshotFileName = ref "snap"
-
-let dumpFileName = ref "dump.ka"
-let cflowFileName = ref "cflow.dot" 
-let profilingName = ref "profiling.txt" 
-let with_weak_compression = "weakly_compressed"
-let without_compression = "without_compression" 
-let influenceFileName = ref ""
-let fluxFileName = ref ""
-let outputDataName = ref "data.out"
 let inputKappaFileNames:(string list ref) = ref [] 
 let marshalizedInFile = ref "" 
-let marshalizedOutFile = ref ""
-
-
-let set name ext_opt =
-  if !name <> "" then
-    let fname =
-      match ext_opt with
-      | None -> !name
-      | Some ext ->
-	 if (Filename.check_suffix !name ext) then !name
-	 else
-	   (!name^"."^ext)
-    in
-    name:=fname
-
-let setOutputName () =
-  set snapshotFileName (Some "dot");
-  set dumpFileName (Some "ka");
-  set influenceFileName (Some "dot") ;
-  set fluxFileName (Some "dot") ;
-  set marshalizedOutFile None;
-  set outputDataName None
-
-let (openOutDescriptors:out_channel list ref) = ref []
 let (openInDescriptors:in_channel list ref) = ref []
-
-let add_out_desc d = openOutDescriptors := d::!openOutDescriptors  
-let add_in_desc d = openInDescriptors := d::!openInDescriptors  
+let add_in_desc d = openInDescriptors := d::!openInDescriptors
 
 type current_compression_mode = Weak | Strong | Causal
 type compression_mode = 
@@ -138,4 +104,4 @@ let get_causal_trace x = x.causal_trace
 let get_causal_trace_only x = not (x.weak_compression || x.strong_compression)
 let get_weak_compression x = x.weak_compression
 let get_strong_compression x = x.strong_compression
-let get_cache_size x = !cache_size
+let get_cache_size () = !cache_size

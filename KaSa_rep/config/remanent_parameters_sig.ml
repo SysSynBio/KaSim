@@ -4,16 +4,18 @@
   * Jérôme Feret, projet Abstraction/Antique, INRIA Paris-Rocquencourt
   * 
   * Creation: 2010, the 19th of December
-  * Last modification: 2014, the 9th of December
+  * Last modification: Time-stamp: <2015-04-17 20:52:36 feret>
   * * 
   * Configuration parameters which are passed through functions computation
-
   *  
-  * Copyright 2010 Institut National de Recherche en Informatique et   
+  * Copyright 2010,2011,2012,2013,2014,2015 
+  * Institut National de Recherche en Informatique et   
   * en Automatique.  All rights reserved.  This file is distributed     
   * under the terms of the GNU Library General Public License *)
 
 (** if unsafe = true, then whenever an exception is raised, a default value is output, and no exception is raised*)
+
+module CharMap = Map.Make (struct type t = char let compare = compare end)
 
 type link_mode = Bound_indices | Site_address | Bound_type 
   
@@ -26,10 +28,12 @@ type symbol_table =
    agent_open : string ;
    agent_close : string ; 
    site_sep_comma : string ;
+   btype_sep : string ;
    agent_sep_comma : string ;
    agent_sep_dot : string ; 
    agent_sep_plus : string ; 
    ghost_agent : string ;
+   show_ghost : bool ; 
    internal : string ;
    uni_arrow : string ;
    rev_arrow : string ; 
@@ -39,6 +43,7 @@ type symbol_table =
 
 type influence_map_output =
   {
+    im_directory : string option ;
     im_file : string option ; 
     rule_shape : string ; 
     rule_color : string ;
@@ -49,11 +54,13 @@ type influence_map_output =
     wake_up_arrow : string ;
     inhibition_arrow : string ;
     prompt_full_var_def: bool ; 
-    prompt_full_rule_def: bool 
+    prompt_full_rule_def: bool ;
+    make_labels_compatible: char list  CharMap.t
   }
   
 type contact_map_output = 
   {
+    cm_directory : string option ;
     cm_file : string option ;
     binding_site_shape : string ;
     binding_site_color : string ; 
@@ -68,13 +75,17 @@ type contact_map_output =
     influence_arrow : string ;
   }
 
-type parameters = 
+type marshalisable_parameters = 
  { 
    unsafe : bool ;
    trace  : bool ;
+   do_contact_map : bool ;
+   do_influence_map : bool ; 
+   do_ODE_flow_of_information : bool ; 
+   do_stochastic_flow_of_information : bool ; 
+   do_site_dependencies : bool ;
+   do_iteration_dependencies : bool ;
    dump_error_as_soon_as_they_occur : bool ;
-   log    : out_channel ;
-   formatter : Format.formatter ; 
    file : string option ; 
    prefix : string ; 
    call_stack : string list;
@@ -82,8 +93,14 @@ type parameters =
    symbols : symbol_table ; 
    influence_map_output : influence_map_output ;
    contact_map_output : contact_map_output ;
-   kasa_state : Remanent_state_signature.engine_state 
+   kasa_state : Remanent_state_signature.engine_state ;
  } 
 
+type parameters = 
+  {
+    log : out_channel ;
+    formatter : Format.formatter ; 
+    marshalisable_parameters : marshalisable_parameters  
+  }
 
     

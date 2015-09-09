@@ -13,17 +13,6 @@
    let pos = lexbuf.lex_curr_p in
    (pos.pos_fname, pos.pos_lnum, pos.pos_cnum - pos.pos_bol)
 
- let return_error opt_pos lexbuf msg =
-   let fn,lnum,cnum =
-     match opt_pos with
-     | Some (fn,ln,cn) -> (fn,ln,cn)
-     | None -> position lexbuf
-   in
-   let loc = Printf.sprintf "line %d, character %d:" lnum cnum in
-   let full_msg = Printf.sprintf "Error (%s) %s %s" fn loc msg
-   in
-   Printf.eprintf "%s\n" full_msg ; exit 1
-
  let keyword_or_id =
  let keywords = Hashtbl.create 15 in
  let () = Hashtbl.add keywords "do" DO in
@@ -31,8 +20,8 @@
  let () = Hashtbl.add keywords "repeat" REPEAT in
  let () = Hashtbl.add keywords "until" UNTIL in
  let () = Hashtbl.add keywords "INF" INFINITY in
- fun x pos ->
- try Hashtbl.find keywords x with Not_found -> ID (x,pos)
+ fun x ->
+ try Hashtbl.find keywords x with Not_found -> ID x
 }
 
 let eol = '\r'? '\n'
@@ -67,13 +56,15 @@ rule token = parse
 		      | "$UPDATE" -> (ASSIGN2 pos)
 		      | "$PRINT" -> (PRINT pos)
 		      | "$PRINTF" -> (PRINTF pos)
+		      | "$PLOTENTRY" -> PLOTENTRY
 		      | s ->
 			 raise
 			   (Syntax_Error
-			      (Some (position lexbuf),
-			       ("Perturbation effect \""^s^"\" is not defined")))
+			      ("Perturbation effect \""^s^"\" is not defined",
+			       (Lexing.lexeme_start_p lexbuf,
+				Lexing.lexeme_end_p lexbuf)))
 		     }
-	 | '[' {let lab = read_label "" [']'] lexbuf in
+	 | '[' {let lab = read_label [] [']'] lexbuf in
 		match lab with
 		| "E" -> EVENT
 		| "E+" -> PROD_EVENT
@@ -98,19 +89,21 @@ rule token = parse
 		| "p" -> PLOTNUM
 		| _ as s ->
 		   raise (Syntax_Error
-			    (Some (position lexbuf),
-			     ("Symbol \""^s^"\" is not defined")))
+			    ("Symbol \""^s^"\" is not defined",
+			     (Lexing.lexeme_start_p lexbuf,
+			      Lexing.lexeme_end_p lexbuf)))
 	       }
 	 | ':' {TYPE}
 	 | ';' {SEMICOLON}
-	 | '\"' {let str = read_label "" ['\"'] lexbuf in
+	 | '\"' {let str = read_label [] ['\"'] lexbuf in
 		 let pos = position lexbuf in STRING (str,pos)}
 	 | eol {Lexing.new_line lexbuf ; NEWLINE}
 	 | '#' {comment lexbuf}
+	 | '/' '*' {inline_comment lexbuf; token lexbuf}
 	 | integer as n {INT (int_of_string n)}
 	 | real as f {FLOAT (float_of_string f)}
 	 | '\'' ([^'\n''\'']+ as x) '\''{LABEL(x)}
-	 | id as str {let pos = position lexbuf in keyword_or_id str pos}
+	 | id as str {keyword_or_id str}
 	 | '@' {AT}
 	 | ',' {COMMA}
 	 | '(' {OP_PAR}
@@ -127,7 +120,7 @@ rule token = parse
 	 | '<' {SMALLER}
 	 | '>' {GREATER}
 	 | '=' {EQUAL}
-	 | '%' {let lab = read_label "" [':'] lexbuf in
+	 | '%' {let lab = read_label [] [':'] lexbuf in
 		let pos = position lexbuf in
 		match lab with
 		| "agent" -> (SIGNATURE pos)
@@ -139,8 +132,9 @@ rule token = parse
 		| "def" -> (CONFIG pos)
 		| "token" -> (TOKEN pos)
 		| _ as s ->
-		   raise (Syntax_Error (Some (position lexbuf),
-					("Instruction \""^s^"\" not recognized")))
+		   raise (Syntax_Error ("Instruction \""^s^"\" not recognized",
+					(Lexing.lexeme_start_p lexbuf,
+					 Lexing.lexeme_end_p lexbuf)))
 	       }
 	 | '!' {let pos = position lexbuf in KAPPA_LNK pos}
 	 | internal_state as s {let i = String.index s '~' in
@@ -153,16 +147,18 @@ rule token = parse
 	 | eof {reach_eof lexbuf; EOF}
 	 | _ as c {
 		    raise (Syntax_Error
-			     (Some (position lexbuf),
-			      (Format.sprintf "invalid use of character %c" c)))
+			     ("invalid use of character "^ String.make 1 c,
+			      (Lexing.lexeme_start_p lexbuf,
+			       Lexing.lexeme_end_p lexbuf)))
 		  }
 
 and read_label acc char_list =
   parse
-  | eof {acc}
+  | eof {String.concat "" (List.rev_map (fun x -> String.make 1 x) acc)}
   | '\\' eol {Lexing.new_line lexbuf ; read_label acc char_list lexbuf}
-  | _ as c {if List.mem c char_list then acc
-	    else read_label (Printf.sprintf "%s%c" acc c) char_list lexbuf}
+  | _ as c {if List.mem c char_list
+	    then String.concat "" (List.rev_map (fun x -> String.make 1 x) acc)
+	    else read_label (c::acc) char_list lexbuf}
 
 and comment = parse
 	    | eol {Lexing.new_line lexbuf ; NEWLINE}
@@ -170,20 +166,29 @@ and comment = parse
 	    | eof {EOF}
 	    | _ {comment lexbuf}
 
+and inline_comment = parse
+		   | eol {Lexing.new_line lexbuf; inline_comment lexbuf}
+		   | '*' '/' { () }
+		   | '\"'
+		       {ignore (read_label [] ['\"'] lexbuf);
+			inline_comment lexbuf}
+		   | '/' '*' {inline_comment lexbuf; inline_comment lexbuf}
+		   | _ {inline_comment lexbuf}
 {
-  let compile fic =
+  let compile logger fic =
     let d = open_in fic in
     Parameter.openInDescriptors := d::(!Parameter.openInDescriptors);
     let lexbuf = Lexing.from_channel d in
     lexbuf.lex_curr_p <- {lexbuf.lex_curr_p with pos_fname = fic} ;
     try
-      Debug.tag (Printf.sprintf "Parsing %s..." fic) ;
-      KappaParser.start_rule token lexbuf ; Debug.tag "done" ; close_in d ;
+      Debug.tag logger ("Parsing "^fic^"...") ;
+      KappaParser.start_rule token lexbuf ; Debug.tag logger "done" ; close_in d ;
       Parameter.openInDescriptors := List.tl (!Parameter.openInDescriptors)
     with
-    | Syntax_Error (opt_pos,msg) ->
+    | Syntax_Error (msg,pos) ->
        (close_in d ;
 	Parameter.openInDescriptors := List.tl (!Parameter.openInDescriptors);
-	return_error opt_pos lexbuf msg
+	let () = Pp.error Format.pp_print_string (msg,pos) in
+	exit 1
        )
 }

@@ -202,12 +202,11 @@ module Preblackboard =
          | Mutex (Lock_side_effect (int,int2,int3,int4)) -> Format.fprintf log "Mutex_side_effect (Step-id:%i,%i/%i.%i)" int int2 int3 int4
          | Fictitious -> Format.fprintf log "Fictitious" 
            
-         let print_known log t x = 
-           match t
-           with 
-             | Unknown -> ()
-             | _ -> Format.fprintf log "%s" x
-               
+         let print_known log t x =
+           match t with
+           | Unknown -> ()
+           | _ -> Format.fprintf log "%s" x
+
          let string_of_predicate_value x = 
 	   match x 
            with 
@@ -1298,8 +1297,11 @@ module Preblackboard =
                    data_structure.old_agents_potential_substitution
                    data_structure.sure_agents}
            in 
-           let sure_agent x = 
-             AgentIdSet.mem x data_structure.sure_agents 
+           let sure_agent = 
+	     if init then (fun _ -> true)
+	     else 
+	       (fun x -> 
+             AgentIdSet.mem x data_structure.sure_agents)
            in 
            let data_structure = 
              {
@@ -1657,16 +1659,14 @@ module Preblackboard =
              let map = PredicateidMap.add pid (test,action) map in 
              map 
            in 
-           let fadd pid p map = 
-             match p 
-             with 
-               | Counter _ | Internal_state_is _ | Undefined 
-               | Defined | Present | Bound | Bound_to_type _ | Unknown -> 
-                 ()
-               | _ -> 
-                 let old = A.get map pid in 
-                 A.set map pid (C.add p old) 
-           in 
+           let fadd pid p map =
+             match p with
+             | Counter _ | Internal_state_is _ | Undefined
+             | Defined | Present | Bound | Bound_to_type _ | Unknown -> ()
+             | (Free | Pointer_to_agent _ | Bound_to _) ->
+		let old = A.get map pid in
+                A.set map pid (C.add p old)
+           in
 
 
              (* deal with created agents *) 
@@ -1851,9 +1851,9 @@ module Preblackboard =
            in 
           
            (*** deal with substitutable agents ***)
-           let error,log_info,blackboard,init_step = 
+           let error,log_info,blackboard,init_step,nlist = 
              AgentIdMap.fold 
-               (fun rule_ag_id l (error,log_info,blackboard,init_step) -> 
+               (fun rule_ag_id l (error,log_info,blackboard,init_step,nlist) -> 
                  let test_list,action_list,side_effect = 
                    begin 
                      try 
@@ -1873,7 +1873,7 @@ module Preblackboard =
                          Not_found -> []
                  in 
                  List.fold_left 
-                   (fun (error,log_info,blackboard,init_step) mixture_ag_id -> 
+                   (fun (error,log_info,blackboard,init_step,nlist) mixture_ag_id -> 
                      let (step:CI.Po.K.refined_step) = CI.Po.K.build_subs_refined_step rule_ag_id mixture_ag_id in 
                      let test_list = 
                        List.rev_map 
@@ -1965,8 +1965,10 @@ module Preblackboard =
                            rule_ag_id 
                            data_structure.rule_agent_id_mutex 
                        with 
-                         Not_found -> 
-                           let _ = Format.printf "ERROR line 1332: %i \n" rule_ag_id  in raise Exit
+                         Not_found ->
+                         (*let () =
+			   Format.fprintf f? "ERROR line 1332: %i@." rule_ag_id in*)
+			 raise Exit
                      in 
                      let error,blackboard,test_map = 
                        List.fold_left 
@@ -2041,11 +2043,20 @@ module Preblackboard =
                          (fun _ test action -> Some(g test,g action))
                          test_map
                          action_map 
-                     in 
-                     let merged_map = 
-                       List.fold_left 
-                         (fun map pid -> PredicateidMap.add pid (Counter 1,Undefined) map)
-                         merged_map
+                     in
+                     let merged_map,nlist =
+		       (* enumeration of potential binding state, according to a substitution *)
+		       (* If the event is selected, check that the wire end in the state 0*)
+		       (* Undef->Counter 0 : opening event *)
+		       (* Counter 0 -> Counter 1 : potential binding type *)
+		       (* => Counter 1 -> Counter 0 : the corresponding substitution is applied *)
+		       (* Counter 0 -> Undef : closing event, check that if the event has been selected (open and closed), then exactely one binding state has been selected, 
+according to the corresponding substitution *)
+		       (* If the event is selected & the according substitution taken, then mutual exclusion among the potential binding state*)	     
+		       List.fold_left 
+                         (fun (map,nlist) pid ->
+			  (PredicateidMap.add pid (Counter 1,Counter 0) map),pid::nlist)
+                         (merged_map,nlist)
                          fictitious_local_list 
                      in 
                      let merged_map = 
@@ -2085,7 +2096,7 @@ module Preblackboard =
                      if side_effect = []
                      && PredicateidMap.is_empty  merged_map 
                      then 
-                       error,log_info,blackboard,init_step
+                       error,log_info,blackboard,init_step,nlist
                      else 
                        begin 
                          let nsid = blackboard.pre_nsteps + 1 in 
@@ -2114,12 +2125,12 @@ module Preblackboard =
                                pre_nsteps = nsid;
                            }
                          in 
-                         error,log_info,blackboard,init_step 
+                         error,log_info,blackboard,init_step,nlist 
                        end )
-                   (error,log_info,blackboard,init_step) l 
+                   (error,log_info,blackboard,init_step,nlist) l 
                ) 
                data_structure.old_agents_potential_substitution
-               (error,log_info,blackboard,init_step)
+               (error,log_info,blackboard,init_step,[])
 
            in 
           
@@ -2437,7 +2448,20 @@ module Preblackboard =
                (fun map (pid,_,(test,action)) -> add_state pid (test,action) map)
                merged_map
                unambiguous_side_effects
-           in 
+           in
+	   let merged_map =
+	     (* If the event is selected, check that the wire end in the state 0*)
+              (* Undef->Counter 0 : opening event *)
+              (* Counter 0 -> Counter 1 : potential binding type *)
+              (* Counter 1 -> Counter 0 : the corresponding substitution is applied *)
+              (* => Counter 0 -> Undef : closing event, check that if the event has been selected (open and closed), then exactely one binding state has been selected, 
+according to the corresponding substitution *)
+	      (* If the event is selected & the according substitution taken, then mutual exclusion among the potential binding state*)
+	     List.fold_left
+	       (fun map pid -> add_state pid (Counter 0,Undefined) map) 
+	       merged_map
+	       nlist
+	   in 
            let side_effect = 
              List.fold_left 
                (fun list (_,a,_) -> 
@@ -2531,12 +2555,11 @@ module Preblackboard =
              map 
            in 
            let fadd pid p map = 
-             match p 
-             with 
+             match p with
                | Counter _ | Internal_state_is _ | Undefined 
                | Defined | Present | Bound | Bound_to_type _ | Unknown -> 
                  ()
-               | _ -> 
+               | Free | Pointer_to_agent _ | Bound_to _ -> 
                  let old = A.get map pid in 
                  A.set map pid (C.add p old) 
            in 

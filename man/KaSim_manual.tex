@@ -9,7 +9,7 @@
 \DeclareGraphicsRule{.tif}{png}{.png}{ 'convert #1 ' dirname #1' /' basename #1 .tif' .png}
 
 \usepackage[T1]{fontenc}
-\usepackage{ textcomp }
+\usepackage{textcomp}
 
 %% LaTeX - Article customise
 
@@ -20,16 +20,21 @@
 \usepackage{amsmath}
 
 \usepackage[linktoc=page,colorlinks=true]{hyperref}
+\expandafter\let\csname NR:Type\endcsname\relax
+
 \usepackage{makeidx}
 \usepackage{color}
+
+\def\KaSimLogo{img/KaSim-Logo.pdf}
 
 \usepackage{fancyhdr} %to insert logo on the left head of each page
 \pagestyle{fancy}
 \begin{titlepage}
-\rhead{\includegraphics[width=35mm]{img/KaSim-logo.png}}
+\rhead{\includegraphics[width=35mm,natwidth=375pt,natheight=200pt]{\KaSimLogo}}
 \end{titlepage}
 
 \def\KaSim{\textsf{KaSim}}
+\def\KaSa{\textsf{KaSa}}
 \def\sep{\hbox{-}}
 \def\int{\textasciitilde}
 \def\intstate{\textasciitilde}
@@ -64,8 +69,8 @@
 %%%%
 \def\version{3}
 
-\title{KaSim\version~reference manual\\ \small (release 4-dev)}
-\author{Pierre Boutillier, J\'er\^ome Feret and Jean Krivine\thanks{corresponding author: jean.krivine@pps.univ-paris-diderot.fr} \\\url{KappaLanguage.org}}
+\title{KaSim\version~\& KaSa\version~reference manual\\ \small (release 4-dev)}
+\author{Pierre Boutillier, J\'er\^ome Feret, Jean Krivine\thanks{corresponding author: jean.krivine@pps.univ-paris-diderot.fr} and L\'y Kim Quy\^en \\\href{http://www.kappalanguage.org}{KappaLanguage.org}}
 
 \date{}
                                     % Activate to display a given date or no date
@@ -81,10 +86,10 @@
 \listoftables
 
 \chapter{Introduction}
-\begin{center}\includegraphics[width=9cm]{img/KaSim-logo.png}\end{center}
+\begin{center}\includegraphics[width=9cm,natwidth=375pt,natheight=200pt]{\KaSimLogo}\end{center}
 
 \section{Preamble}
-This manual describes the usage of \KaSim, the latest implementation of Kappa, one member of the growing family of rule-based languages. Rule-based modelling has attracted recent attention in developing biological models that are concise, comprehensible, easily extensible, and allows one to deal with the combinatorial complexity of multi-state and multi-component biological molecules. 
+This manual describes the usage of \KaSim~and \KaSa, the latest implementation of Kappa, one member of the growing family of rule-based languages. Rule-based modelling has attracted recent attention in developing biological models that are concise, comprehensible, easily extensible, and allows one to deal with the combinatorial complexity of multi-state and multi-component biological molecules. 
 Although this manual contains a self-contained description of Kappa, it is \emph{not} intended as a tutorial on rule-based modeling.%%Therefore, in the following of this manual some familiarity with Kappa is assumed and 
 %
 
@@ -117,6 +122,13 @@ each step (see Fig.~\ref{fig:event-loop}). Importantly, the cost of a simulation
 Note that \KaSim~is not equipped with a %curve 
 visualization tool. However, data outputs are given in a text format that can be displayed using any standard plotting software such as \href{http://www.gnuplot.info/}{gnuplot}.
 
+\section{The \KaSa~static analyser}
+
+\KaSa~is an open source static analyser  tool of rule-based models~\cite{DanLan04,Dan_etal07a,Fae_etal05} written in Kappa. \KaSa~takes one or several \hyperref[chap:kappa]{Kappa files} as input and some command line options to toggle on/off some specific static analysis. Currently, only the computation of the contact map and of the influence map are available. Other analyses including reachability analysis \cite{Feret-ICCMSE2007,DanosEtAl-VMCAI08} and model reduction \cite{Feret-et-al-pnas2009,DanosEtAl-LICS2010,Feret-MFPSXXVII} will come soon. 
+
+A graphical interface is proposed to navigate through the various options and utilities  of \KaSa. The compilation of this interface requires \href{https://forge.ocamlcore.org/projects/labltk/}{labltk} and, in particular,  \href{http://www.tcl.tk/}{tk-dev}.
+
+
 \section{Support}
 \ITE{
 \item[-] Kappa language tutorials and downloads: \url{http://kappalanguage.org}
@@ -128,16 +140,16 @@ visualization tool. However, data outputs are given in a text format that can be
 \chapter{Installation}\label{chap:install}
 
 \section{Using precompiled binaries}
-The easiest way to use \KaSim~is to use pre-compiled versions available in the release section on the github repository (\url{https://github.com/Kappa-Dev/KaSim/releases}). Download the version that corresponds to your operating system (Windows, Linux or Mac OSX) and rename the downloaded file into \KaSim. Note that on Mac OSX or Linux, it might be necessary to give executable permissions to \KaSim. This can be done using the shell command:
-\ttt{chmod u+x KaSim}.
+The easiest way to use \KaSim~and \KaSa~is to use pre-compiled versions available in the release section on the github repository (\url{https://github.com/Kappa-Dev/KaSim/releases}). Download the version that corresponds to your operating system (Windows, Linux or Mac OSX) and rename the downloaded file into \KaSim~and \KaSa. Note that on Mac OSX or Linux, it might be necessary to give executable permissions to \KaSim~and \KaSa. This can be done using the shell commands:
+\ttt{chmod u+x KaSim} and \ttt{chmod u+x KaSa}
 
 To test whether your program does work, simply type \ttt{./KaSim \dd version} on a terminal, from the directory that contains the binaries. If the version is displayed it means that the binaries are indeed compatible with your OS. Otherwise you may need to compile \KaSim~from the sources (see next Section).
 
 \section{Obtaining the sources}\label{sec:sources}
-To obtain \KaSim~you can either use pre-compiled binaries (see previous section)
+To obtain \KaSim/\KaSa~you can either use pre-compiled binaries (see previous section)
 or compile the sources for your architecture. To do so, download the source code
 from \url{https://github.com/Kappa-Dev/KaSim}, make sure you have a recent ocaml
-compiler (\KaSim~currently requires Ocaml 4.01.0 to compile) and the findlib library
+compiler (\KaSim/\KaSa~currently requires Ocaml 4.01.0 to compile) and the findlib library
 installed. From a terminal window type \ttt{ocamlfind ocamlopt -v}. If it fails
 then you need to install Ocaml Native compiler that can be downloaded from
 \url{http://caml.inria.fr/download.en.html} and/or findlib available at
@@ -148,7 +160,8 @@ Once Ocaml is safely installed, untar \KaSim~archive and compile following these
 few steps: \ITE{
 \item[\$]\ttt{tar xzvf kasim.tar.gz -d Kappa}
 \item[\$]\ttt{cd Kappa}
-\item[\$]\ttt{make bin/KaSim} } At the end of these steps you should see, in the
+\item[\$]\ttt{make bin/KaSim} 
+\item[\$]\ttt{make bin/KaSa}} At the end of these steps you should see, in the
 \ttt{bin} directory of the \ttt{Kappa} directory, an executable file named
 KaSim.  In order to check the compilation went fine, simply type
 \ttt{bin/KaSim -\,-version}.
@@ -157,12 +170,51 @@ If the tool \ttt{ocamlbuild} is not in your path, you may
 set the variable \ttt{OCAMLBINPATH} to point to the location of the
 compiler by doing \ttt{make OCAMLBINPATH='the\_correct\_dir' bin/KaSim}.
 
+\section{Compilation of KaSa~graphical interface}
+
+The graphical interface of \KaSa~requires \href{http://www.tcl.tk/}{tk-dev} and 
+\href{https://forge.ocamlcore.org/projects/labltk/}{labltk}. By default, the graphical interface is not compiled. The compilation of this interface can be toggled on by using the following script: \ITE{
+\item[\$]\ttt{cd Kappa}
+\item[\$]\ttt{sh switch\_full.sh}
+\item[\$]\ttt{make bin/KaSa}}
+
+Common compilation errors are the following:
+\begin{enumerate}
+\item The following error: 
+
+\begin{verbatim}
+/usr/bin/ld: cannot find -ltk
+collect2: error: ld returned 1 exit status
+File "caml_startup", line 1:
+Error: Error during linking
+Command exited with code 2.
+\end{verbatim}
+
+occurs when the module  \href{http://www.tcl.tk/}{tk-dev} is not installed. 
+\item The following error:
+
+\begin{verbatim}
+File "_none_", line 1:
+Error: Cannot find file jpflib.cmxa
+Command exited with code 2.
+\end{verbatim}
+
+occurs when ocaml cannot link the labltk library. 
+
+Please document the variable \texttt{LABLTKLIBREP} in the Makefile. 
+
+\end{enumerate}
+
+
+
+
+
 \chapter{The command line}\label{chap:cl}
 
 \section{General usage}
 From a terminal window, \KaSim~can be invoked by typing 
 \ITE{
-\item[\$] \ttt{KaSim -i file\_1 ... -i file\_n [option] }
+\item[\$] \ttt{KaSim file\_1 ... file\_n [option] }
 }
 where \ttt{file\_i} are the input Kappa files containing the rules, initial conditions and observables (see Chapter~\ref{chap:kappa}). Tables~\ref{tab:options} and \ref{tab:add-options} summarize all the options that can be given to the simulator. Basically, one specifies an upper bound either in simulated or bio-time (arbitrary time unit), or in number of events. Note that bio-time is computed using Gillespie{\textquotesingle}s formula for time advance (see Fig.~\ref{fig:event-loop}) and should not be confused with CPU-time (it{\textquotesingle}s not even proportional). In doubt, we recommend using a bound in number of events since the cost of one event is bounded (in CPU time) by a constant, so the CPU-time used for simulating $n$ events is roughly $k$ times lower than that used for simulating $k\times n$ events.
 
@@ -172,18 +224,19 @@ Table~\ref{tab:options} summarizes the main options that are accessible through 
 
 \begin{table}[h!]
 \caption{Command line: main options}
-\begin{center}
+\centering
 \begin{tabular}{|l|l|}
 \hline 
 Argument & Description \\ \hline
 \ttt{-e $e_{\mit{max}}$} & Terminates simulation after $e_{\mit{max}}\geq 0$ events\\
 \ttt{-t $t_{\mit{max}}$} & Terminates simulation after $t_{\mit{max}}\geq 0.0$ time units\\
 \ttt{-p $n$} & Produces a data file\index{data file} (default: \ttt{data.out}) with $n\geq 0$ data points\\
-\ttt{-o} \textit{file} & Set the name of data file to \textit{file}\\ 
+\ttt{-o} \textit{file} & Set the name of data file to \textit{file}\\
+\ttt{-i} \textit{file} & Interpret \textit{file} as an input filename\\
+& (for compatibility with \KaSim <= 3 and filenames starting by -)\\
 \ttt{-d} \textit{dir} & Output any produced file to the directory \textit{dir}\\
 \hline
 \end{tabular}
-\end{center}
 \label{tab:options}
 \end{table}%
 
@@ -193,7 +246,7 @@ Table~\ref{tab:add-options} summarizes the advanced options that are accessible 
 
 \begin{table}[h!]
 \caption{Command line: advanced options}
-\begin{center}
+\centering
 \begin{tabular}{|l|l|}
 \hline 
 Argument & Description \\ \hline
@@ -202,10 +255,10 @@ Argument & Description \\ \hline
 \ttt{ -make-sim} \textit{sim\_file} & makes a simulation package out of the input kappa files \\
 \ttt{ -load-sim} \textit{sim\_file} & use simulation package \textit{sim\_file} as input\\
 \ttt{ \dd gluttony} & simulation mode that is memory intensive \\ & but that speeds up simulation time\\
-
+\ttt{ \dd batch} & Set non interactive mode (never halt waiting for an user\\
+& action but assume default (data loosing) answer)\\
 \hline
 \end{tabular}
-\end{center}
 \label{tab:add-options}
 \end{table}%
 %
@@ -213,11 +266,11 @@ Argument & Description \\ \hline
 \section{Example}
 The command 
 \ITE{
-\item[\$] \ttt{KaSim -i model.ka -e 1000000 -p 1000 -o model.out}  
+\item[\$] \ttt{KaSim model.ka -e 1000000 -p 1000 -o model.out}  
 }
 will generate a file \ttt{model.out} containing the trajectories of the observables defined in the kappa file \ttt{model.ka}. The file \ttt{model.out} will contain 1000 data points (\ie in this case, a measure will be taken every 1000 events). The command
 \ITE{
-\item[\$] \ttt{KaSim -i init.ka -i rules.ka -i obs.ka -i mod.ka -t 1.5 -p 1000}  
+\item[\$] \ttt{KaSim init.ka rules.ka obs.ka mod.ka -t 1.5 -p 1000}  
 }
 will generate a file \ttt{data.out} (default name) containing 1000 data points of a simulation of 1.5 (arbitrary) time units of the model. Note that the input Kappa file is split in four files containing, for instance, the initial conditions, \ttt{init.ka}, the rule set, \ttt{rules.ka}, the observables, \ttt{obs.ka}, and the perturbations, \ttt{pert.ka} (see Chapter~\ref{chap:kappa} for details). The order in which the files are given does not matter.
 
@@ -226,13 +279,12 @@ will generate a file \ttt{data.out} (default name) containing 1000 data points o
 \section{General remarks}
 The \emph{Kappa File}\index{kappa file} (KF) is the formal
 representation of your model. We use KF\index{kappa file} to denote
-the union of the files that are given as input to \KaSim~(argument
-\ttt{-i}). Each line of the KF\index{kappa file} is interpreted by
-\KaSim~as a \emph{declaration}\index{declaration}. If the line is
-ended by the escape character~{\textquotesingle}
-\ttt{$\bs$}{\textquotesingle} ~the continuation of the
-declaration\index{declaration} is parsed onto the next
-line. Declarations can be: agent and token \emph{signatures}
+the union of the files that are given as input to \KaSim. Each line of
+the KF\index{kappa file} is interpreted by \KaSim~as a
+\emph{declaration}\index{declaration}. If the line is ended by the
+escape character~{\textquotesingle} \ttt{$\bs$}{\textquotesingle} ~the
+continuation of the declaration\index{declaration} is parsed onto the
+next line. Declarations can be: agent and token \emph{signatures}
 (Sec.~\ref{sec:sig}), \emph{rules}\index{rule} (Sec.~\ref{sec:rules}),
 \emph{variables}\index{variable} (Sec.~\ref{sec:var}), \emph{initial
   conditions}\index{initial condition} (Sec.~\ref{sec:init}),
@@ -242,10 +294,11 @@ KF\index{kappa file}'s structure is quite flexible and can be divided
 in any number of sub-files in which the order of
 declaration\index{declaration}s does not matter (to the exception of
 variable declaration\index{declaration}s, see Section~\ref{sec:var}
-for details). Comments\index{comments} can be used by inserting the
-marker \ttt{\#} that tells \KaSim~to ignore the rest of the line. The
-combined use of \ttt{$\bs$} and \ttt{\#} allows to write comments in
-the middle of a declaration\index{declaration}.
+for details). Comments\index{comments} can be used either by inserting
+the marker \ttt{\#} that tells \KaSim~to ignore the rest of the line
+or by putting any text between the delimiters \ttt{/*} and \ttt{*/}. The
+combined use of \ttt{$\bs$} and \ttt{\#} is an alternative way to
+write comments in the middle of a declaration\index{declaration}.
 
 \section{Agent and token signatures}\index{agent signature}\label{sec:sig}
 %
@@ -340,7 +393,7 @@ Sticking with \ttt{A}'s signature\index{agent signature}, the rule
 indicates that an agent \ttt{A} free on site \ttt{z}, no matter what its internal state is, may beget a new copy of \ttt{A} bound to it \via site \ttt{x}. Note that in the RHS, the interface of the new copy is not completely described. Following the DCDW convention\index{don't care don't write}, \KaSim~will then assume that the sites that are not mentioned are created in the \emph{default state}\index{default state}, \ie they appear free of any bond and their internal state (if any) is the first of the list shown in the signature\index{agent signature} (here state \ttt{u} for \ttt{y} and \ttt{0} for \ttt{z}).
 
 Importantly, \KaSim~respects the \emph{longest prefix convention}\index{longest prefix convention} to determine which agent in the RHS stems from an agent in the LHS. 
-In a word, from a rule of the form $a_1,\dots,a_n\rar b_1,\dots,b_k$, with $a_i$s and $b_j$s being agents, one computes the largest $i\leq n,k$ such that the agents $a_1,\dots,a_i$ are pairwise consistent with $b_1,\dots,b_i$, \ie the $a_j$s and $b_j$s have the same name and the same number of sites. In which case we say that the for all $j\leq i$, $a_j$ is \emph{preserved} by the transition and for all $j>i$, $a_j$ is \emph{deleted} by the transition and $b_j$ is \emph{created} by the transition. This convention allows us to write a deletion rule as:
+In a word, from a rule of the form $a_1,\dots,a_n\rar b_1,\dots,b_k$, with $a_i$s and $b_j$s being agents, one computes the largest $i\leq n,k$ such that the agents $a_1,\dots,a_i$ are pairwise consistent with $b_1,\dots,b_i$, \ie the $a_j$s and $b_j$s have the same name and the same number of sites. In which case we say that for all $j\leq i$, $a_j$ is \emph{preserved} by the transition and for all $j>i$, $a_j$ is \emph{deleted} by the transition and $b_j$ is \emph{created} by the transition. This convention allows us to write a deletion rule as:
 \ITE{
 \item[] \ttt{{\textquotesingle}deleting A\textquotesingle\  A(x!1),A(z!1)} $\rar$ \ttt{A(x) @ $\ga$} 
 }
@@ -498,7 +551,7 @@ which will tell \KaSim~to apply the above rule with a rate $\ga_2$ for binary in
 \end{enumerate}
 }
 
-Notice at lines 10-12 the use of binary/unary notation for rules. As a result binding between between freely floating agents will occur at rate \ttt{{\textquotesingle}k2{\textquotesingle}} while binding between agents that are part of the same complex will occur at rate \ttt{{\textquotesingle}k1{\textquotesingle}}. Line 21 contains a \emph{perturbation} that requires \KaSim~to stop the simulation after 10,000 events and output the list of molecular species present in the final mixture\index{mixture} as a dot file (see Section~\ref{sec:mod}) and that we give Figure~\ref{fig:species}.
+Notice at lines 10-12 the use of binary/unary notation for rules. As a result binding between  freely floating agents will occur at rate \ttt{{\textquotesingle}k2{\textquotesingle}} while binding between agents that are part of the same complex will occur at rate \ttt{{\textquotesingle}k1{\textquotesingle}}. Line 21 contains a \emph{perturbation} that requires \KaSim~to stop the simulation after 10,000 events and output the list of molecular species present in the final mixture\index{mixture} as a dot file (see Section~\ref{sec:mod}) and that we give Figure~\ref{fig:species}.
 
 \begin{figure}[htbp]
 \begin{center}
@@ -558,7 +611,7 @@ where \ttt{var\_name} can be any string and \textit{algebraic\_expression} are d
 \midrule
 \ttt{[}$f$\texttt{]} & usual mathematical functions and constants \\ &with $f\in\set{\hbox{\ttt{log,exp,sin,cos,tan,sqrt,pi}}}$ \\
 \ttt{[int]} & the floor function $x\in\Real\mapsto \lfloor x\rfloor\in\Z$ \\
-\ttt{+,-,*,/,\^} & basic mathematical operators (infix notation)\\
+\ttt{+,-,*,/,\textasciicircum} & basic mathematical operators (infix notation)\\
 \ttt{[mod]} & the \emph{modulo} operator (infix notation)\\
 \ttt{[max]} & the \emph{maximum} of two values \\
 \ttt{[min]} & the \emph{minimum} of two values \\
@@ -655,12 +708,12 @@ There are two main points to notice about this model: \ttt{A} can modify both si
 We try first a coarse simulation of $100,000$ events (10 times the number of agents in the initial system).
 \ttt{
 \ITE{
-\item[\$] KaSim -i ABC.ka -e 100000 -p 1000 -o abc.out
+\item[\$] KaSim ABC.ka -e 100000 -p 1000 -o abc.out
 }}
 Plotting the content of the \ttt{abc.out} file one notices that nothing of significant interest happen to the observables after 250s. So we can now specify a meaningful time limit by running
 \ttt{
 \ITE{
-\item[\$] KaSim -i ABC.ka -e 100000 -t 250 -p 1000 -o abc.out
+\item[\$] KaSim ABC.ka -e 100000 -t 250 -p 1000 -o abc.out
 }}
 which produces the data points whose rendering is given in Fig.~\ref{fig:abc}.
 \begin{figure}[htbp]
@@ -710,6 +763,7 @@ where \textit{boolean\_expression} and \textit{effect\_list}\index{effect} are d
 	&& | \tcb{\$FLUX} \textit{string\_expression} \textit{boolean} \\
     && | \tcb{\$TRACK \var{var\_name}} \textit{boolean} \\
     && | \tcb{\$UPDATE \var{var\_name}} \textit{algebraic\_expression} \\
+    && | \tcb{\$PLOTENTRY} \\
     && | \tcb{\$PRINT} \tcb{<}\textit{string\_expression}\tcb{>} \\
     && | \tcb{\$PRINTF} \textit{string\_expression} \tcb{<}\textit{string\_expression}\tcb{>} \\
     \\
@@ -758,7 +812,7 @@ The modified kappa file is available in the source repository, in the \ttt{model
 Running again a simulation (a bit longer) by entering in the command line:
 \ttt{
 \ITE{
-\item[\$] KaSim -i ABC-pert.ka -e 100000 -t 300 -p 1000 -o abc2.out
+\item[\$] KaSim ABC-pert.ka -e 100000 -t 300 -p 1000 -o abc2.out
 }}
 one obtains the curve given in Fig.~\ref{fig:abc2}. 
 
@@ -831,9 +885,9 @@ will ask \KaSim~to output 3 versions of each computed causal flow, with all poss
 
 \subsection{Flux maps}
 
-\begin{figure}[h] %  figure placement: here, top, bottom, or page
+\begin{figure}[p] %  figure placement: here, top, bottom, or page
    \centering
-\includegraphics[width=6cm,natwidth=921pt,natheight=793pt]{generated_img/flux.png}
+\includegraphics[width=15cm,natwidth=921pt,natheight=793pt]{generated_img/flux.png}
    \caption{Flux map of the \ttt{abc.ka} model, taken from t=0 to t=20 time units. The \ttt{A} releasing rules \ttt{a..b} and \ttt{mod x2} are contributing very little to the activity of \ttt{a.c} which is a sign of an excess of free \ttt{A}s in the system at this time interval.}
    \label{fig:flux}
 \end{figure}
@@ -887,6 +941,13 @@ The effect \ttt{\$PRINT <\textit{string\_expression}>} enables one to output val
 }}
 will ask \KaSim~to output the value of token \ttt{A} in a file "token\_$n$.dat" which changes at each new productive event, each time its value gets below 0.
 
+\subsection{Add an entry in the output data}
+The effect \ttt{\$PLOTENTRY} outputs a line with the current value of observables in the data file. For example,
+\ttt{\ITE{
+\item[] \%mod: repeat [E+] [mod] 10 = 0 do \$PLOTENTRY until [false]
+}}
+will store the value of observables every 10 productive events.
+
 \section{Link type}
 
 In standard kappa, in order to require a site to be bound for an interaction to occur, one may use the \emph{semi-link}\index{semi-link} construct \ttt{!\_} which does not specify who the partner of the bond is. For instance in the variable:
@@ -907,7 +968,7 @@ will count the number of \ttt{A}s whose site \ttt{x} is connected to a site \ttt
 
 The simulation algorithm that is implemented in \KaSim~requires an initialization phase whose complexity is proportional to $R*G$ where $R$ is the cardinal of the rule set and $G$ the size of the initial mixture\index{mixture}. Thus for large systems, initialization may take a while. Whenever a user wishes to run several simulations of the \emph{same} kappa model, it is possible to skip this initialization phase by creating a \emph{simulation package}\index{simulation package}. For instance:
 \ttt{\ITE{
-\item [] KaSim -i abc.ka -t $n$ -make-sim abc.kasim
+\item [] KaSim abc.ka -t $n$ -make-sim abc.kasim
 }}
 will generate a standard simulation of the \ttt{abc.ka} model, but in addition, will create the simulation package \ttt{abc.kasim} (.kasim extension is not mandatory). This package is a binary file, \ie not human readable, that can be used as input of a new simulation using the command:
 \ttt{\ITE{
@@ -972,6 +1033,187 @@ More formally, consider the rules $r:L\rar R$ and $s:L'\rar R'$. One wishes to k
    \label{fig:im}
 \end{figure}
 
+\chapter{The \KaSa~static analyser}
+
+\section{General usage}
+
+From a terminal window, \KaSa~can be invoked by typing 
+\ITE{
+\item[\$] \ttt{KaSa file\_1 ... file\_n  [option]}
+}
+where \ttt{file\_i} are the input Kappa files containing the rules, initial conditions and observables (see Chapter~\ref{chap:kappa}). 
+
+All the options are summarised as follows: 
+\input{generated_img/KaSa_options.txt}
+
+Orders in option matter, since they can be used to toggle on/off some functionalities or to assign a value to some environment variables. 
+The options are interpreted from left to right. 
+
+More options are available in the OCaml file \texttt{KaSa\_rep/config/config.ml} and can be tuned before compilation. 
+
+\section{Graphical interface}
+
+\subsection{Launching the interface}
+
+The graphical interface can be launched by typing 
+\ITE{\item[\$] \ttt{KaSa}}
+
+without any option. 
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=12cm,natwidth=920pt,natheight=582pt]{img/kasa_0.png}
+\caption{\KaSa~ graphical interface - main onglet}
+\label{fig:kasa:0}
+\end{figure}
+
+\subsection{The areas of interests} 
+
+There are five different areas of importance in the graphical interface: 
+\begin{enumerate}
+\item On the top left of the window, a button allows for the selection between the Normal and the Expert mode (other modes may be available if activated at compilation). 
+In expert modes, more options are available in the graphical interface.
+\item On the top center/right, some button allows for the selection of the onglet. There are currently five onglets available: \texttt{0\_Actions}, \texttt{1\_Output}, \texttt{2\_Reachability\_analysis}, \texttt{3\_Influence\_map}, \texttt{4\_debugging\_information}. 
+\item Center: The options of the selected onglet are displayed and can be tuned. 
+
+Contextual help is provided when the mouse is hovered over an element. 
+
+The interface will store the options that are checked or filled and the order in which they have been selected. 
+When launched, the analysis interprets these options in the order they have been entered. 
+
+Some options appear in several onglets. They denote the same option and share the same value. 
+
+\item File selector: The file selector can be used to upload as many kappa files as desired. The button '\texttt{Clear}' can be used to reset the selection of files.
+\item Bottom: Some buttons are available. The button '\texttt{Quit}' can be used to leave the interface. The button '\texttt{Reset to default}' tune all the options to their default value. The button '\texttt{Import options}' can be used to restore the value of the options as saved during a previous session of the graphical interfaces. The button '\texttt{Save options}' can be used to save the value of the options for a further session. The button '\texttt{Launch analyze}' launch \KaSa\ with the current options. 
+
+Importantly, options are saved automatically under various occasions. Thus, it is possible to restore the value of the options 
+before the last reset, before the last quit, or before the last analysis. 
+\end{enumerate}
+
+\subsection{The onglet \texttt{0\_Actions}}
+
+The onglet \texttt{0\_Actions} (see Fig.~\ref{fig:kasa:0}) contains the main actions which can be performed. 
+
+\begin{itemize}
+\item The button \texttt{--do-all} activates all the functionalities. 
+\item The button \texttt{--reset-all} inactivates all the functionalities.
+\item The option \texttt{--compute-contact-map} can be used to activate the computation of the contact map. 
+\item The option \texttt{--compute-influence-map} can be used to activate the computation of the influence map.
+\end{itemize}
+
+\subsection{The onglet \texttt{1\_Output}}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=12cm,natwidth=920pt,natheight=582pt]{img/kasa_1.png}
+\caption{\KaSa~ graphical interface - main onglet}
+\label{fig:kasa:1}
+\end{figure}
+
+
+The onglet \texttt{1\_Ouput} (see Fig.~\ref{fig:kasa:1}) contains the names of the output files. 
+
+\begin{itemize}
+\item The field \texttt{--output-directory} can be used to set the repository where output file are written. \KaSa~will not create this repository, thus it has to exist. 
+\item The field \texttt{--output-contact-map} contains the name of the file for the contact map. 
+\item The field \texttt{--output-influence-map} contains the name of the file for the influence map. 
+\end{itemize}
+
+When a file already exists, it is overwritten without any warning. 
+
+\section{Contact map}
+
+The contact map of a model is an object that may help modelers checking the consistency of the rule set they use. The contact map is \emph{statically} computed and does not depend on kinetic rates nor initial conditions.
+
+
+Typing the following instruction:
+
+\texttt{KaSa abc.ka --reset-all --compute-contact-map}
+
+will produce a dot format file named \texttt{contact.dot}. 
+The name of the output file and the directory can be changed to the command line options \texttt{--output-contact-map} and \texttt{--output-directory}. 
+The directory is assumed to exist. The file will be overwritten if it exists. All the options related to the computation of the contact map can be accessed on the 
+onglet \texttt{2\_Reachability\_analysis} of the graphical interface (see Fig.~\ref{fig:kasa:2}). 
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=12cm,natwidth=920pt,natheight=582pt]{img/kasa_2.png}
+\caption{\KaSa~ graphical interface - onglet \texttt{2\_Reachability\_analysis}}
+\label{fig:kasa:2}
+\end{figure}
+
+
+The contact map summarises the different types of agent, their interface and the potential binding between sites. It is an over approximation, thus if the contact map indicates a potential bond, it does not mean that it is always possible to reach a state in which two sites of these kinds are bound, but if the contact map indicates no bond between two sites, it means that it is NOT possible to reach a state in which two sites of these kinds are bound together.  
+
+
+The contact map for the \ttt{abc.ka} model  defined in Chapter~\ref{chap:abc} is given in Figure~\ref{fig:abc-contact}. On this map, we notice that there are three kinds of agent, namely $A$, $B$, and $C$. 
+Agents of kind $A$ have two sites $x$ and $c$, that bear no internal state (they appear in yellow only), agents of kind $B$ have one site $x$, that bears no internal state (they appear in yellow only), and agents of kind $C$ have two sites $x_1$ and $x_2$ with both a binding state and an internal state (they appear both in yellow and in green). We notice that when a site can bear both an internal state and a binding state, they are considered as two different sites in the contact map. Additionally, the contact map indicates that sites $x$ of the agents of kind $A$ can be bound to the site $x$ of an agent of kind $B$ and that sites $c$ of the agents of kind $A$ can be bound to the agents of kind $C$ either on the site $x_1$, or on the site $x_2$. 
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=8cm,natwidth=920pt,natheight=582pt]{generated_img/abc_contact.png}
+\caption{Contact Map for the \ttt{abc.ka} model defined in Chapter~\ref{chap:abc}}
+\label{fig:abc-contact}
+\end{figure}
+
+
+
+\section{Influence map}
+
+The influence map of a model is an object that may help modelers checking the consistency of the rule set they use. 
+
+Typing the following instruction:
+
+\texttt{KaSa abc.ka --reset-all --compute-influence-map}
+
+will produce a dot format file named \texttt{influence.dot}. 
+The name of the output file and the directory can be changed to the command line options \texttt{--output-influence-map} and \texttt{--output-directory}. 
+The directory is assumed to exist. The file will be overwritten if it exists.  All the options related to the computation of the influence map can be accessed on the onglet \texttt{3\_Influence\_map} of the graphical interface (see Fig.~\ref{fig:kasa:3}). 
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=12cm,natwidth=920pt,natheight=582pt]{img/kasa_3.png}
+\caption{\KaSa~ graphical interface - onglet \texttt{3\_Influence\_map}}
+\label{fig:kasa:3}
+\end{figure}
+
+Unlike the flux map, the influence map is \emph{statically} computed and does not depend on kinetic rates nor initial conditions. It describes how rules may potentially influence each other during a simulation. \KaSa~will produce a dot format file containing the influence relation over all rules and observables of the model. The produced graph visualised using a circular rendering\footnote{One may use for instance the \ttt{circo} program that is part of the \textit{graphviz} suite.} is given in Figure~\ref{fig:kasa-abc-im}. Observables are represented as circular nodes and rules as rectangular nodes. The labels of the nodes are either the label of the rule or of the observable (if available), otherwise it is made of a unique identifier allocated by \KaSa~followed by the kappa definition of the rule/observable. 
+Edges are decorated with the list of embeddings (separated by a semi-colon) allowing the identification of agents in both rules{\textquotesingle}s right hand sides/left hand sides. 
+More precisely, for positive influences,  the notation $[i\rar j]$ denotes a pair of embeddings from the agent number $i$ of the origin{\textquotesingle}s right hand side and from the agent number $j$ of the target{\textquotesingle}s left hand side and the notation $[i\star \rar j]$ denotes a pair of embeddings from an agent attached to the agent number $i$  of the origin{\textquotesingle}s left hand side, which have been freed by side effect  and   from the agent number $j$ of the target{\textquotesingle}s left hand side; for negative influences,  the notation $[i\rar j]$ denotes a pair of embeddings from the agent number $i$ of the origin{\textquotesingle}s left hand side and from the agent number $j$ of the target{\textquotesingle}s left hand side and the notation $[i\star \rar j]$ denotes a pair of embeddings from an agent attached to the agent number $i$  of the origin{\textquotesingle}s left hand side, which have been freed by side effect  and   from the agent number $j$ of the target{\textquotesingle}s left hand side;
+ Observables have no influence, but they can be influenced by rules, if the rule can increase or decrease their value. 
+
+
+\begin{figure}[htbp] %  figure placement: here, top, bottom, or page
+   \centering
+   \includegraphics[width=15cm]{generated_img/abc_influence.png} 
+   \caption{The influence map of the \ttt{abc.ka} model defined in Chapter~\ref{chap:abc}. Edge labels denote embeddings with the convention that 
+the notation $[i\rar j]$, in a positive influence, denotes a pair of embeddings from the agent number $i$ of the origin{\textquotesingle}s right hand side and from the agent number $j$ of the target{\textquotesingle}s left hand side; 
+the notation $[i\rar j]$, in negative influence,  denotes a pair of embeddings from the agent number $i$ of the origin{\textquotesingle}s left hand side and from the agent number $j$ of the target{\textquotesingle}s left hand side; 
+the notation $[i\star \rar j]$, whatever the influence is positive of negative,  denotes a pair of embeddings from an agent attached to the agent number $i$  of the origin{\textquotesingle}s left hand side, which have been freed by side effect  and   from the agent number $j$ of the target{\textquotesingle}s left hand side. }
+   \label{fig:kasa-abc-im}
+\end{figure}
+
+More formally, consider the rules $r:L\rar R$ and $s:L'\rar R'$. One wishes to know whether it is possible that the application of rule $r$ over a graph $G$ creates a new instance of rule $s$ (which is called a positive influence and that is described by green arrows in the influence map), or destroy a previous instance of rule $s$ (which is called negative influence and that is described by red arrows in the influence map). 
+In Fig.~\ref{fig:imbis}, we illustrate the construction of positive influences due to overlap of the left hand side of a rule and the right hand side of another rule on some sites that are modified by the former one. 
+
+\begin{figure}[htbp] %  figure placement: here, top, bottom, or page
+   \centering
+\includegraphics[width=8cm,natwidth=1462pt,natheight=756pt]{img/im.png}
+   \caption{Computation of the influence of the top rule on the rule below: the right hand side of the first rules embeds in a common term with the left hand side of the second rule. It results that the first rule has a positive influence on the second.}
+   \label{fig:imbis}
+\end{figure}
+
+The current implementation has the following limitations:
+\begin{itemize}
+\item Currently, only observables that are defined as patterns are taken into account. 
+\item Not atomic observables which are defined as algebraic expressions are not taken into account yet. The observables are ignored. 
+\item The influence map does not take into account indirect influences due to perturbations (which could arises when the application of a rule triggers a perturbation which would create some agents or increase/decrease the value of some variables). 
+\item Token are not taken into yet. They are currently ignored. 
+\item Positive/negative influence of time is not taken into account either. 
+\end{itemize}
+
+Lastly, KaSa\ computes an over-approximation of the influence map. They may show an influence despite the fact that there can be no actual one. But if it shows no influence it means that either there are NO such influence, or that we are in a case that is not covered yet as itemised previously. 
+
 \chapter{Frequently asked questions}
 \section*{Simulation hangs after a while}
 If the progress bar seems stalled, it does not necessarily mean that the simulation is blocked. In particular when a simulation is triggered with a \emph{time} limit (\ttt{-t} option of the command line) it might only indicate that the bio clock is stalled while computation events still occur. Recall that the average (bio) time one has to wait in order to apply a rule is $1/A$, where $A$ is the sum of all the rule activities (which is equal to the number of instances that a rule has, times its kinetic rate). Whenever the number of occurrences of a rule grows too fast (if new agents are created during the simulation for instance), or if the kinetic rate of a rule is defined by a function that grows rapidly, the average time increment might tend to 0 and if it remains so for a while, it will block the progress bar whose advance is proportional to the bio time \ttt{[T]}. 
@@ -989,15 +1231,18 @@ Make sure you have \ttt{\%obs} or \ttt{\%plot} instructions in your KF\index{kap
 The value of a kappa expression $E$  is equal to the number of embeddings\index{embedding} it has in the current mixture\index{mixture} $M$. Embeddings are maps from agents in $E$  to agents in $M$. If $E$ has symmetries then every permutation of $E$ will be counted as a new embedding. For instance let $E=$\ttt{A(x!1),A(x!1)}  and let $M=$\ttt{A(x!1,y\intstate p),A(x!1,y\intstate u)}. 
 \KaSim~will count two instances of $E$ in $M$: the one mapping the first \ttt{A} of $E$ to the first \ttt{A} of $M$ and the one mapping the first \ttt{A} of $E$ to the second \ttt{A} of $M$.
  
-\section*{The computed influence map is incorrect, it misses some activation or has to much of them}
-The influence map\index{influence map} contains relations that are computed on side effect free rules only. It is likely that a missing activation is due to a side effect that is not taken into account. If the influence map shows an activation between rule $r$ and $s$ that is never possible with a given model, just remember that activation computation implies that \emph{there exists} a context in which applying rule $r$ will create a new instance of rule $s$. This context might simply never be realized with the given rules or initial conditions.
+\section*{The computed influence map is incorrect, it misses some activation or has too much of them}
+The influence map\index{influence map} computed by \KaSim~contains relations that are computed on side effect free rules only. It is likely that a missing activation is due to a side effect that is not taken into account. If the influence map shows an activation between rule $r$ and $s$ that is never possible with a given model, just remember that activation computation implies that \emph{there exists} a context in which applying rule $r$ will create a new instance of rule $s$. This context might simply never be realized with the given rules or initial conditions.
 
 \section*{Value \ttt{nan} in the data file\index{data file} at the end of the simulation}
 The value \ttt{nan} means "Not a Number". It is generated when a plotted variable is infinite. Make sure this variable is not divided by zero at some point.
 
 \bibliographystyle{plain}
-\bibliography{fmb,concur} 
+\bibliography{fmb,concur,static_analyses} 
 
 \printindex
 
 \end{document}  
+%%% Local Variables:
+%%% ispell-local-dictionary: "british"
+%%% End:

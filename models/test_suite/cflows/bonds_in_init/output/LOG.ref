@@ -1,0 +1,67 @@
++ Command line is: 'KaSim' '-i' 'bonds_in_init.ka' '-t' '40' '-seed' '611463625' '-d' 'output'
+Parsing bonds_in_init.ka...
+done
++ Initialized random number generator with seed 611463625
++ Compiling...
+	 -simulation parameters
+	 -agent signatures
+	 -variable declarations
+	 -initial conditions
+	 -rules
+	 -observables
+	 -perturbations
+	 Done
++ Analyzing non local patterns...
++ Building initial simulation state...
+	 -Counting initial local patterns...
+	 Done
+____________________________________________________________
+#######################################################
++ Producing causal compressions
+	 - refining events
+	 - detecting siphons
+	 - cutting concurrent events
+	 - computing causal past of each observed events (10)
+
+Stats:
+ number of step   : 721
+ longest story    : 622
+ average length   : 265.969117647
+ geometric mean   : 326.720637548
+
+	 - causal & weak flow compression (10)
+
+____________________________________________________________
+############################################################	 - detecting pseudo inverse events
+	 - computing causal past of each observed events (10)
+
+Stats:
+ number of step   : 81
+ longest story    : 22
+ average length   : 13.5
+ geometric mean   : 14.0178457689
+
+	 - causal & weak flow compression (10)
+
+____________________________________________________________
+############################################################
+
+
+
+	 - strong flow compression (1)
+
+____________________________________________________________
+############################################################
++ Pretty printing 6 flows
+
++ Pretty printing 1 weakly compressed flow
+
++ Pretty printing 1 strongly compressed flow
+
+Simulation ended (eff.: 0.815085, detail below)
+	Valid embedding but no longer unary when required: 0.000000
+	Valid embedding but not binary when required: 0.000000
+	Clashing instance: 0.000000
+	Lazy negative update: 1.000000
+	Lazy negative update of non local instances: 0.000000
+	Perturbation interrupting time advance: 0.000000

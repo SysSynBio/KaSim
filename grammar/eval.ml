@@ -1,16 +1,12 @@
 open Mods
-open Mixture
-open Dynamics
 open Tools
 open Ast
 
-type link = Closed | Semi of int * int * pos
+type link = Closed | Semi of (int * int) Term.with_pos
 
 type context =
     { pairing : link IntMap.t; curr_id : int;
       new_edges : (int * int) Int2Map.t }
-
-let interface_for_decl ast_intf =()
 
 let eval_intf ast_intf =
   let rec iter ast_intf map =
@@ -21,9 +17,8 @@ let eval_intf ast_intf =
        in
        if StringMap.mem (fst p.Ast.port_nme) map then
 	 raise
-	   (ExceptionDefn.Semantics_Error
-	      (pos_of_lex_pos (fst (snd p.Ast.port_nme)),
-	       "Site '" ^ (fst p.Ast.port_nme) ^ "' is used multiple times"))
+	   (ExceptionDefn.Malformed_Decl
+	      ("Site '" ^ (fst p.Ast.port_nme) ^ "' is used multiple times",snd p.Ast.port_nme))
        else
 	 iter ast_interface
 	      (StringMap.add (fst p.Ast.port_nme) (int_state_list, lnk_state, (snd p.Ast.port_nme)) map)
@@ -34,18 +29,9 @@ let eval_intf ast_intf =
 
 let eval_node env a link_map node_map node_id =
   let ast_intf = snd a in
-  let ag_name = fst (fst a) in
-  let pos_ag = pos_of_lex_pos (fst (snd (fst a))) in
-  let name_id =
-    try Environment.num_of_name ag_name env with
-    | Not_found ->
-       raise (ExceptionDefn.Semantics_Error (pos_ag,"Agent '" ^ ag_name ^ "' is not declared"))
-  in
-  let sign =
-    try Environment.get_sig name_id env with
-    | Not_found ->
-       raise (ExceptionDefn.Semantics_Error (pos_ag,"Agent '" ^ ag_name ^ "' is not declared"))
-  in
+  let (agent_name,_ as agent) = fst a in
+  let name_id = Environment.num_of_name agent env in
+  let sign = Environment.get_sig name_id env in
 
   (*Begin sub function*)
   let rec build_intf ast link_map intf bond_list =
@@ -54,44 +40,35 @@ let eval_node env a link_map node_map node_id =
        begin
 	 let int_state_list = p.Ast.port_int
 	 and lnk_state = p.Ast.port_lnk in
-	 let port_name = fst p.Ast.port_nme in
+	 let port_name = p.Ast.port_nme in
 	 let prt_pos = snd p.Ast.port_nme in
-	 let port_id =
-	   try Signature.num_of_site port_name sign with
-	     Not_found ->
-	     raise (ExceptionDefn.Malformed_Decl
-		      ("Site '" ^ port_name ^ "' is not declared",prt_pos))
-	 in
+	 let port_id = Signature.num_of_site ~agent_name port_name sign in
 	 let link_map,bond_list =
 	   match lnk_state with
-	   | (Ast.LNK_VALUE (i),(beg_pos,_)) ->
+	   | (Ast.LNK_VALUE (i),pos) ->
 	      begin
-		let pos = pos_of_lex_pos beg_pos in
 		try
 		  let opt_node = IntMap.find i link_map in
 		  match opt_node with
-		  | None -> raise (ExceptionDefn.Semantics_Error
-				     (pos,"Edge identifier at site '" ^ port_name ^ "' is used multiple times"))
-		  | Some (node_id',port_id',pos') ->
+		  | None ->
+		     raise (ExceptionDefn.Malformed_Decl
+			      ("Edge identifier at site '" ^ fst port_name
+			       ^ "' is used multiple times",pos))
+		  | Some (node_id',port_id',_) ->
 		     (IntMap.add i None link_map,(node_id,port_id,node_id',port_id')::bond_list)
 		with Not_found -> (IntMap.add i (Some (node_id,port_id,pos)) link_map,bond_list)
 	      end
 	   | (Ast.FREE,_) -> (link_map,bond_list)
-	   | _ -> raise (ExceptionDefn.Malformed_Decl
-			   ("Site '" ^ port_name ^ "' is partially defined",
-			    prt_pos))
+	   | (Ast.LNK_SOME, _ | Ast.LNK_TYPE _, _ | Ast.LNK_ANY, _) ->
+	      raise (ExceptionDefn.Malformed_Decl
+		       ("Site '" ^ fst port_name ^ "' is partially defined",
+			prt_pos))
 	 in
 	 match int_state_list with
 	 | [] ->
 	    build_intf ast' link_map (IntMap.add port_id (None,Mixture.WLD) intf) bond_list
 	 | s::_ ->
-	    let i =
-	      try Signature.num_of_internal_state port_id (fst s) sign
-	      with Not_found ->
-		raise (ExceptionDefn.Malformed_Decl
-			 ("Internal state of site'" ^ port_name ^ "' is not defined"
-			 ,prt_pos))
-	    in
+	    let i = Signature.num_of_internal_state port_id s sign in
 	    build_intf ast' link_map
 		       (IntMap.add port_id (Some i,Mixture.WLD) intf) bond_list
        (*Geekish, adding Mixture.WLD to be consistent with Node.create*)
@@ -114,64 +91,47 @@ let eval_node env a link_map node_map node_id =
        Node.set_ptr (node_i,pi) (Node.Ptr (node_j,pj))
      with Not_found -> invalid_arg "Eval.eval_node"
     ) bond_list ;
-  (node_map,link_map,env)
+  (node_map,link_map)
 
 let nodes_of_ast env ast_mixture =
-  let rec iter ast_mixture node_map node_id link_map env =
+  let rec iter ast_mixture node_map node_id link_map =
     match ast_mixture with
-    | Ast.COMMA (a, ast_mix) ->
-       let (node_map,link_map,env) = eval_node env a link_map node_map node_id in
-       iter ast_mix node_map (node_id+1) link_map env
-    | Ast.EMPTY_MIX ->
+    | a :: ast_mix ->
+       let (node_map,link_map) = eval_node env a link_map node_map node_id in
+       iter ast_mix node_map (node_id+1) link_map
+    | [] ->
        IntMap.iter
 	 (fun i opt ->
 	  match opt with
 	  | None -> ()
 	  | Some (_,_,pos) ->
-	     raise (ExceptionDefn.Semantics_Error (pos,Printf.sprintf "Edge identifier %d is dangling" i))
+	     raise (ExceptionDefn.Malformed_Decl
+		      ("Edge identifier "^string_of_int i^" is dangling",pos))
 	 ) link_map ;
-       (node_map,env)
+       (node_map)
   in
-  iter ast_mixture IntMap.empty 0 IntMap.empty env
+  iter ast_mixture IntMap.empty 0 IntMap.empty
 
 let eval_agent env a ctxt =
-  let ((ag_name, (pos_ag)),ast_intf) = a in
+  let ((agent_name, pos_ag),ast_intf) = a in
   let name_id =
-    try Environment.num_of_name ag_name env with
-    | Not_found ->
-       raise (ExceptionDefn.Malformed_Decl
-		("Agent '" ^ ag_name ^ "' is not declared",pos_ag))
-  in
-  let sign =
-    try (Environment.get_sig name_id env)
-    with Not_found ->
-      raise (ExceptionDefn.Malformed_Decl
-	       ("Agent '" ^ ag_name ^ "' is not declared",pos_ag))
-  in
+    Environment.num_of_name (agent_name,pos_ag) env in
+  let sign = Environment.get_sig name_id env in
   let port_map = eval_intf ast_intf in
   let (interface, ctxt) =
     StringMap.fold
       (fun site_name (int_state_list, lnk_state, prt_pos) (interface, ctxt) ->
        let site_id =
-	 try (Signature.num_of_site site_name sign)
-	 with Not_found ->
-	   let msg =
-	     "Eval.eval_agent: site '" ^
-	       (site_name^("' is not defined for agent '"^ag_name^"'"))
-	   in
-	   raise (ExceptionDefn.Malformed_Decl (msg,prt_pos))
-       in
+	 Signature.num_of_site ~agent_name (site_name,prt_pos) sign in
        let int_s =
 	 match int_state_list with
 	 | [] -> None
 	 | h::_ ->
-	    Environment.check ag_name (pos_of_lex_pos (fst pos_ag)) site_name
-			      (pos_of_lex_pos (fst prt_pos)) (fst h) env;
-	    let i = Environment.id_of_state ag_name site_name (fst h) env
+	    Environment.check (agent_name,pos_ag) (site_name,prt_pos) h env;
+	    let i = Environment.id_of_state agent_name site_name h env
 	    in Some i
        in
        let interface,ctx =
-	 let pos = pos_of_lex_pos (fst (snd lnk_state)) in
 	 match fst lnk_state with
 	 | Ast.LNK_VALUE n ->
 	    let lnk =
@@ -179,7 +139,7 @@ let eval_agent env a ctxt =
 	       with | Not_found -> None)
 	    in
 	    (match lnk with
-	     | Some (Semi (b, j, _)) ->
+	     | Some (Semi ((b, j), _)) ->
 		((IntMap.add site_id (int_s, Mixture.BND) interface),
 		 {ctxt	with
 		   pairing = IntMap.add n Closed ctxt.pairing;
@@ -191,14 +151,14 @@ let eval_agent env a ctxt =
 		let msg =
 		  "edge identifier " ^
 		    ((string_of_int n) ^ " is used too many times")
-		in raise (ExceptionDefn.Semantics_Error (pos, msg))
+		in raise (ExceptionDefn.Malformed_Decl (msg,snd lnk_state))
 	     | None ->
 		((IntMap.add site_id (int_s, Mixture.BND) interface),
 		 {
 		   (ctxt)
 		 with
 		   pairing =
-		     IntMap.add n (Semi (ctxt.curr_id, site_id, pos))
+		     IntMap.add n (Semi ((ctxt.curr_id, site_id), snd lnk_state))
 				ctxt.pairing;
 		})
 	    )
@@ -208,22 +168,18 @@ let eval_agent env a ctxt =
 	    ((IntMap.add site_id (int_s, Mixture.WLD) interface), ctxt)
 	 | Ast.FREE ->
 	    ((IntMap.add site_id (int_s, Mixture.FREE) interface), ctxt)
-	 | Ast.LNK_TYPE ((ste_nm, pos_ste), (ag_nm, pos_ag)) ->
+	 | Ast.LNK_TYPE ((ste_nm, pos_ste), (ag_nm, _)) ->
 	    (let site_num =
 	       try Environment.id_of_site ag_nm ste_nm env
 	       with
 	       | Not_found ->
 		  raise
-		    (ExceptionDefn.Semantics_Error
-		       (pos_ste, "binding type is not compatible with agent's signature"))
+		    (ExceptionDefn.Malformed_Decl
+		       ("binding type is not compatible with agent's signature",
+			pos_ste))
 	     in
 	     let ag_num =
-	       try Environment.num_of_name ag_nm env with
-	       | Not_found ->
-		  raise
-		    (ExceptionDefn.Semantics_Error
-		       (pos_ste,"Illegal binding type, agent "^ag_nm^" is not delcared"))
-	     in
+	       Environment.num_of_name (Term.with_dummy_pos ag_nm) env in
 	     ((IntMap.add site_id (int_s, Mixture.TYPE (site_num, ag_num)) interface),ctxt)
 	    )
        in
@@ -236,7 +192,7 @@ let eval_agent env a ctxt =
 let mixture_of_ast ?mix_id env ast_mix =
   let rec eval_mixture env ast_mix ctxt mixture =
     match ast_mix with
-    | Ast.COMMA (a, ast_mix) ->
+    | a :: ast_mix ->
        let (ctxt, agent) = eval_agent env a ctxt in
        let id = ctxt.curr_id in let new_edges = ctxt.new_edges in
        let (ctxt, mixture, env) =
@@ -246,7 +202,7 @@ let mixture_of_ast ?mix_id env ast_mix =
 			new_edges = Int2Map.empty;
 		      } mixture
        in (ctxt, (Mixture.compose id agent mixture new_edges), env)
-    | Ast.EMPTY_MIX -> (ctxt, mixture, env)
+    | [] -> (ctxt, mixture, env)
   in
   let ctxt = { pairing = IntMap.empty; curr_id = 0; new_edges = Int2Map.empty; } in
   let (ctxt, mix, env) = eval_mixture env ast_mix ctxt (Mixture.empty mix_id)
@@ -256,10 +212,10 @@ let mixture_of_ast ?mix_id env ast_mix =
       (fun n link ->
        match link with
        | Closed -> ()
-       | Semi (_, _, pos) ->
+       | Semi (_, pos) ->
 	  let msg =
 	    "edge identifier " ^ ((string_of_int n) ^ " is not paired")
-	  in raise (ExceptionDefn.Semantics_Error (pos, msg))
+	  in raise (ExceptionDefn.Malformed_Decl (msg,pos))
       )
       ctxt.pairing;
     let mix = Mixture.enum_alternate_anchors mix in
@@ -267,15 +223,14 @@ let mixture_of_ast ?mix_id env ast_mix =
     (mix,env) (*Modifies mix as a side effect*)
   end
 
-let rec initial_value_alg env (ast, (beg_pos,end_pos)) =
+let rec initial_value_alg env (ast, _) =
   match ast with
   | Expr.CONST n -> n
-  | Expr.STATE_ALG_OP (Term.CPUTIME) -> Nbr.F 0.
-  | Expr.KAPPA_INSTANCE id -> Nbr.I 0
+  | Expr.KAPPA_INSTANCE _ -> Nbr.I 0
   | Expr.ALG_VAR i ->
      initial_value_alg
        env (snd env.Environment.algs.NamedDecls.decls.(i))
-  | Expr.TOKEN_ID i -> Nbr.F 0.
+  | Expr.TOKEN_ID _ -> Nbr.F 0.
   | Expr.STATE_ALG_OP _ -> Nbr.I 0
   | Expr.BIN_ALG_OP (op,ast, ast') ->
      Nbr.of_bin_alg_op op (initial_value_alg env ast)
@@ -283,7 +238,7 @@ let rec initial_value_alg env (ast, (beg_pos,end_pos)) =
   | Expr.UN_ALG_OP (op,ast) -> Nbr.of_un_alg_op op (initial_value_alg env ast)
 
 let mixtures_of_result c_mixs env (free_id,mixs) =
-  let (env',compiled_mixs,final_id) =
+  let (env',compiled_mixs,_final_id) =
     List.fold_left
       (fun (env,mixs,id) (lbl,ast) ->
        (* <awful hack> *)
@@ -327,7 +282,8 @@ let rule_of_ast ?(backwards=false) ~is_pert env mixs
        (****TODO HERE treat ast_opt that specifies application radius****)
        let env =
 	 Environment.declare_unary_rule
-	   (Some (Environment.kappa_of_num lhs_id env,Tools.no_pos)) (*ast_rule_label*) lhs_id env in
+	   (Some (Term.with_dummy_pos (Environment.kappa_of_num lhs_id env)))
+	   (*ast_rule_label*) lhs_id env in
        let a_mixs'',k_alt,dep = reduce_val ast env a_mixs' in
        let a_mixs''',radius_alt,dep = match ast_opt with
 	   None -> (a_mixs'',None,dep)
@@ -349,7 +305,8 @@ let rule_of_ast ?(backwards=false) ~is_pert env mixs
        let id =
 	 try Environment.num_of_token nme env
 	 with Not_found ->
-	   raise (ExceptionDefn.Semantics_Error (pos,"Token "^nme^" is undefined"))
+	   raise (ExceptionDefn.Malformed_Decl
+		    ("Token "^nme^" is undefined",pos))
        in
 
        let (mixs',(alg,_pos)) =
@@ -369,7 +326,6 @@ let rule_of_ast ?(backwards=false) ~is_pert env mixs
     Term.DepSet.fold
       (*creating dependencies between variables in the kinetic rate and the activity of the rule*)
       (fun dep env ->
-       (*Printf.printf "rule %d depends on %s\n" r_id (Mods.string_of_dep dep); *)
        Environment.add_dependencies dep (Term.RULE r_id) env)
       (Term.DepSet.union dep dep_alt) env
   in
@@ -398,7 +354,9 @@ let rule_of_ast ?(backwards=false) ~is_pert env mixs
        | Primitives.FREE ((Primitives.KEPT id,s),side_effect_free) ->
 	  if side_effect_free then
 	    begin
-	      let id' = match Mixture.follow (id,s) lhs with None -> invalid_arg "Eval.build_cc_impact: Free action should be side effect free" | Some (id',s') -> id' in
+	      let id' = match Mixture.follow (id,s) lhs with
+		| None -> invalid_arg "Eval.build_cc_impact: Free action should be side effect free"
+		| Some (id',_) -> id' in
 	      let is_deleted = not (IntMap.mem id' (Mixture.agents rhs)) in
 	      if is_deleted then (con_map,dis_map,side_eff) (*will deal with this case in the deletion action*)
 	      else
@@ -424,7 +382,7 @@ let rule_of_ast ?(backwards=false) ~is_pert env mixs
 	  let set = try IntMap.find id (side_eff:IntSet.t IntMap.t) with Not_found -> IntSet.empty in
 	  let set =
 	    Signature.fold
-	      (fun site_id set ->
+	      (fun site_id _ set ->
 	       if site_id = 0 then set
 	       else
 		 let opt = Mixture.follow (id,site_id) lhs in
@@ -437,7 +395,7 @@ let rule_of_ast ?(backwards=false) ~is_pert env mixs
 			match lnk with
 			| Mixture.BND | Mixture.TYPE _ ->
 				      IntSet.add site_id set (*semi link deletion*)
-			| _ -> set
+			| Mixture.FREE | Mixture.WLD -> set
 		      with
 		      | Not_found ->
 			 IntSet.add site_id set (*deletion of site that was not mentionned so possible side_effect*)
@@ -447,7 +405,9 @@ let rule_of_ast ?(backwards=false) ~is_pert env mixs
 	      ) sign set
 	  in
 	  (con_map,dis_map,IntMap.add id set side_eff)
-       | _ -> (con_map,dis_map,side_eff)
+       | (Primitives.MOD _ | Primitives.ADD _
+	  | Primitives.BND _ | Primitives.FREE ((Primitives.FRESH _,_),_)) ->
+	  (con_map,dis_map,side_eff)
       ) (IntMap.empty,IntMap.empty,IntMap.empty) script
   in
   let connect_impact =
@@ -513,7 +473,7 @@ let variables_of_result env mixs alg_a =
 		  (env',0) alg_a
   in (env'',compiled_mixs)
 
-let rules_of_result env mixs res tolerate_new_state =
+let rules_of_result env mixs res =
   let (env, mixs, l) =
     List.fold_left
       (fun (env, mixs, cont) (_,(ast_rule,_) as ast) ->
@@ -563,23 +523,23 @@ let effects_of_modif variables lrules env ast_list =
     | ast::tl ->
        let (variables,lrules,rev_effects,env) =
 	 match ast with
-	 | INTRO (alg_expr, ast_mix, pos) ->
+	 | INTRO (alg_expr, ast_mix, _) ->
 	    let (mix,alg_pos) =
 	      Expr.compile_alg env.Environment.algs.NamedDecls.finder
 			       env.Environment.tokens.NamedDecls.finder
 			       (env.Environment.fresh_kappa,[]) alg_expr in
 	    let (env',mixs') = mixtures_of_result mixs env mix in
 	    let ast_rule =
-	      { add_token=[]; rm_token=[]; lhs = Ast.EMPTY_MIX; arrow = Ast.RAR;
+	      { add_token=[]; rm_token=[]; lhs = []; arrow = Ast.RAR;
 		rhs = ast_mix; k_def=Term.with_dummy_pos (Ast.CONST(Nbr.F 0.0));
 		k_un=None;k_op=None;
 	      } in
 	    let env,mixs'',rule =
-	      rule_of_ast ~is_pert:true env mixs'
+	      rule_of_ast ~is_pert:true env' mixs'
 			  (None, Term.with_dummy_pos ast_rule) in
 	     (mixs'', rule::lrules,
 		(Primitives.ITER_RULE (alg_pos, rule))::rev_effects, env)
-	 | DELETE (alg_expr, ast_mix, pos) ->
+	 | DELETE (alg_expr, ast_mix, _) ->
 	    let (mix,alg_pos) =
 	      Expr.compile_alg env.Environment.algs.NamedDecls.finder
 			       env.Environment.tokens.NamedDecls.finder
@@ -587,12 +547,12 @@ let effects_of_modif variables lrules env ast_list =
 	    let (env',mixs') = mixtures_of_result mixs env mix in
 	    let ast_rule =
 	      { add_token=[]; rm_token=[]; lhs = ast_mix; arrow = Ast.RAR;
-		rhs = Ast.EMPTY_MIX;
+		rhs = [];
 		k_def=Term.with_dummy_pos (Ast.CONST(Nbr.F 0.0));
 		k_un=None;k_op=None;
 	      } in
 	    let env,mixs'',rule =
-	      rule_of_ast ~is_pert:true env mixs'
+	      rule_of_ast ~is_pert:true env' mixs'
 			  (None,Term.with_dummy_pos ast_rule) in
 	     (mixs'', rule::lrules,
 		(Primitives.ITER_RULE (alg_pos, rule))::rev_effects, env)
@@ -620,8 +580,8 @@ let effects_of_modif variables lrules env ast_list =
 	    let tk_id =
 	      try Environment.num_of_token tk_nme env with
 	      | Not_found ->
-		 raise (ExceptionDefn.Semantics_Error
-			  (tk_pos,"Token " ^ (tk_nme ^ " is not defined")))
+		 raise (ExceptionDefn.Malformed_Decl
+			  ("Token " ^ (tk_nme ^ " is not defined"),tk_pos))
 	    in
 	    let (mix, alg_pos) =
 	      Expr.compile_alg env.Environment.algs.NamedDecls.finder
@@ -629,18 +589,18 @@ let effects_of_modif variables lrules env ast_list =
 			       (env.Environment.fresh_kappa,[]) alg_expr in
 	    let (env',mixs') = mixtures_of_result mixs env mix in
 	    (mixs',lrules,(Primitives.UPDATE (Term.TOK tk_id, alg_pos))::rev_effects,env')
-	 | SNAPSHOT (pexpr,pos) ->
+	 | SNAPSHOT (pexpr,_) ->
 	    let (mix,pexpr') =
 	      compile_print_expr env (env.Environment.fresh_kappa,[]) pexpr in
 	    let (env',mixs') = mixtures_of_result mixs env mix in
 	    (*when specializing snapshots to particular mixtures, add variables below*)
 	    (mixs', lrules, (Primitives.SNAPSHOT pexpr')::rev_effects, env')
-	 | STOP (pexpr,pos) ->
+	 | STOP (pexpr,_) ->
 	    let (mix,pexpr') =
 	      compile_print_expr env (env.Environment.fresh_kappa,[]) pexpr in
 	    let (env',mixs') = mixtures_of_result mixs env mix in
 	    (mixs', lrules, (Primitives.STOP pexpr')::rev_effects, env')
-	 | CFLOW ((lab,pos_lab),pos_pert) ->
+	 | CFLOW ((lab,pos_lab),_) ->
 	    let id =
 	      try Environment.num_of_rule lab env
 	      with Not_found ->
@@ -654,7 +614,7 @@ let effects_of_modif variables lrules env ast_list =
 			   ,pos_lab))
 	    in
 	    (mixs, lrules, (Primitives.CFLOW id)::rev_effects, env)
-	 | CFLOWOFF ((lab,pos_lab),pos_pert) ->
+	 | CFLOWOFF ((lab,pos_lab),_) ->
 	    let id =
 	      try Environment.num_of_rule lab env
 	      with Not_found ->
@@ -668,22 +628,24 @@ let effects_of_modif variables lrules env ast_list =
 			   ,pos_lab))
 	    in
 	    (mixs, lrules, (Primitives.CFLOWOFF id)::rev_effects, env)
-	 | FLUX (pexpr,pos) ->
+	 | FLUX (pexpr,_) ->
 	    let (mix,pexpr') =
 	      compile_print_expr env (env.Environment.fresh_kappa,[]) pexpr in
 	    let (env',mixs') = mixtures_of_result mixs env mix in
 	    (mixs', lrules, (Primitives.FLUX pexpr')::rev_effects, env')
-	 | FLUXOFF (pexpr,pos) ->
+	 | FLUXOFF (pexpr,_) ->
 	    let (mix,pexpr') =
 	      compile_print_expr env (env.Environment.fresh_kappa,[]) pexpr in
 	    let (env',mixs') = mixtures_of_result mixs env mix in
 	    (mixs', lrules, (Primitives.FLUXOFF pexpr')::rev_effects, env')
-	 | PRINT (pexpr,print,pos) ->
+	 | PRINT (pexpr,print,_) ->
 	    let (mix,pexpr') =
 	      compile_print_expr env (env.Environment.fresh_kappa,[]) pexpr in
 	    let (mix',print') = compile_print_expr env mix print in
 	    let (env',mixs') = mixtures_of_result mixs env mix' in
 	    (mixs',lrules,(Primitives.PRINT (pexpr',print'))::rev_effects,env')
+	 | PLOTENTRY ->
+	    (mixs, lrules, (Primitives.PLOTENTRY)::rev_effects, env)
        in
        iter variables lrules rev_effects env tl
   in
@@ -694,7 +656,6 @@ let pert_of_result variables env rules res =
     List.fold_left
       (fun (variables, p_id, lpert, lrules, env)
 	   ((pre_expr, modif_expr_list, opt_post),pos) ->
-       let bpos = pos_of_lex_pos (fst pos) in
        let (mix,(pre,_pos)) =
 	 Expr.compile_bool env.Environment.algs.NamedDecls.finder
 			   env.Environment.tokens.NamedDecls.finder
@@ -703,8 +664,9 @@ let pert_of_result variables env rules res =
        let (dep, stopping_time) = try Expr.deps_of_bool_expr pre
 		 with ExceptionDefn.Unsatisfiable ->
 		   raise
-		     (ExceptionDefn.Semantics_Error
-			(bpos,"Precondition of perturbation is using an invalid equality test on time, I was expecting a preconditon of the form [T]=n"))
+		     (ExceptionDefn.Malformed_Decl
+			("Precondition of perturbation is using an invalid equality test on time, I was expecting a preconditon of the form [T]=n"
+			,pos))
        in
        let (variables, lrules', effects, env) =
 	 effects_of_modif variables' lrules env' modif_expr_list in
@@ -718,12 +680,13 @@ let pert_of_result variables env rules res =
 				env.Environment.tokens.NamedDecls.finder
 				(env.Environment.fresh_kappa,[]) post_expr in
 	    let (env', variables') = mixtures_of_result variables env mix in
-	    let (dep,stopping_time) =
+	    let (dep,stopping_time') =
 	      try Expr.deps_of_bool_expr post with
 		ExceptionDefn.Unsatisfiable ->
 		raise
-		  (ExceptionDefn.Semantics_Error
-		     (bpos,"Precondition of perturbation is using an invalid equality test on time, I was expecting a preconditon of the form [T]=n"))
+		  (ExceptionDefn.Malformed_Decl
+		     ("Precondition of perturbation is using an invalid equality test on time, I was expecting a preconditon of the form [T]=n"
+		     ,pos))
 	    in
 	    (env',variables',Some (post,dep))
        in
@@ -758,7 +721,7 @@ let pert_of_result variables env rules res =
 	   Primitives.stopping_time = stopping_time
 	 }
        in
-       (variables', succ p_id, pert::lpert, lrules', env)
+       (variables, succ p_id, pert::lpert, lrules', env)
       )
       (variables, 0, [], rules, env) res.perturbations
   in
@@ -773,10 +736,10 @@ let pert_of_result variables env rules res =
 
 let init_graph_of_result env res =
   let n = Array.length env.Environment.tokens.NamedDecls.decls in
-  let token_vector = Array.init n (fun i -> 0.) in
-  let sg,env =
+  let token_vector = Array.init n (fun _ -> 0.) in
+  let sg =
     List.fold_left
-      (fun (sg,env) (opt_vol,init_t,pos) -> (*TODO dealing with volumes*)
+      (fun sg (opt_vol,init_t,_) -> (*TODO dealing with volumes*)
        match init_t with
        | INIT_MIX (alg, ast) ->
 	  let (_,alg') =
@@ -786,7 +749,6 @@ let init_graph_of_result env res =
 	  let value = initial_value_alg env alg' in
 	  let cpt = ref 0 in
 	  let sg = ref sg in
-	  let env = ref env in
 	  let n = match !Parameter.rescale with
 	    | None -> Nbr.to_int value
 	    | Some i -> min i (Nbr.to_int value)
@@ -794,12 +756,11 @@ let init_graph_of_result env res =
 	  (* Cannot do Mixture.to_nodes env m once for all because of *)
 	  (* references                                               *)
 	  while !cpt < n do
-	    let nodes,env' = nodes_of_ast !env ast in
-	    env := env' ;
+	    let nodes = nodes_of_ast env ast in
 	    sg := Graph.SiteGraph.add_nodes !sg nodes;
 	    cpt := !cpt + 1
 	  done;
-	  (!sg,!env)
+	  !sg
        | INIT_TOK (alg, (tk_nme,pos_tk)) ->
 	  let (_,alg') =
 	    Expr.compile_alg env.Environment.algs.NamedDecls.finder
@@ -809,23 +770,25 @@ let init_graph_of_result env res =
 	  let tok_id =
 	    try Environment.num_of_token tk_nme env
 	    with Not_found ->
-	      raise (ExceptionDefn.Semantics_Error
-		       (pos_tk, Printf.sprintf "token %s is undeclared" tk_nme))
+	      raise (ExceptionDefn.Malformed_Decl
+		       ("token "^tk_nme^" is undeclared",pos_tk))
 	  in
 	  token_vector.(tok_id) <- value;
-	  (sg,env)
-      )	(Graph.SiteGraph.init !Parameter.defaultGraphSize,env) res.Ast.init
+	  sg
+      )	(Graph.SiteGraph.init !Parameter.defaultGraphSize) res.Ast.init
   in
-  (sg,token_vector,env)
+  (sg,token_vector)
 
 let configurations_of_result result =
-  let set_value pos_p param value_list f ass =
+  let raw_set_value pos_p param value_list f =
     match value_list with
-    | (v,pos) :: _ -> ass := f (v,pos)
+    | (v,_) :: _ -> f v pos_p
     | [] -> ExceptionDefn.warning
 	      ~pos:pos_p
 	      (fun f -> Format.fprintf f "Empty value for parameter %s" param)
   in
+  let set_value pos_p param value_list f ass =
+    raw_set_value pos_p param value_list (fun x p -> ass := f x p) in
   List.iter
     (fun ((param,pos_p),value_list) ->
      match param with
@@ -833,126 +796,130 @@ let configurations_of_result result =
 	begin
 	  let rec parse l =
 	    match l with
-	    | ("strong",pos_v)::tl ->
+	    | ("strong",_)::tl ->
 	       (Parameter.strongCompression := true ; parse tl)
 	    | ("weak",_)::tl -> (Parameter.weakCompression := true ; parse tl)
 	    | ("none",_)::tl -> (Parameter.mazCompression := true ; parse tl)
 	    | [] -> ()
-	    | (error,pos)::tl ->
-	       raise (ExceptionDefn.Semantics_Error
-			(pos,Printf.sprintf "Unkown value %s for compression mode" error))
+	    | (error,_)::_ ->
+	       raise (ExceptionDefn.Malformed_Decl
+			("Unkown value "^error^" for compression mode", pos_p))
 	  in
 	  parse value_list
 	end
      | "cflowFileName"	->
-	set_value pos_p param value_list fst Parameter.cflowFileName
+	raw_set_value pos_p param value_list (fun x _ -> Kappa_files.set_cflow x)
      | "progressBarSize" ->
 	set_value pos_p param value_list
-		  (fun (v,p) ->
+		  (fun v p ->
 		   try int_of_string v
 		   with _ ->
-		     raise (ExceptionDefn.Semantics_Error
-			      (p,Printf.sprintf "Value %s should be an integer" v))
+		     raise (ExceptionDefn.Malformed_Decl
+			      ("Value "^v^" should be an integer", p))
 		  ) Parameter.progressBarSize
 
      | "progressBarSymbol" ->
 	set_value pos_p param value_list
-		  (fun (v,p) ->
+		  (fun v p ->
 		   try
 		     String.unsafe_get v 0
 		   with _ ->
-		     raise (ExceptionDefn.Semantics_Error
-			      (p,Printf.sprintf "Value %s should be a character" v))
+		     raise (ExceptionDefn.Malformed_Decl
+			      ("Value "^v^" should be a character",p))
 		  ) Parameter.progressBarSymbol
 
      | "dumpIfDeadlocked" ->
 	set_value pos_p param value_list
-		  (fun (value,pos_v) ->
+		  (fun value pos_v ->
 		   match value with
 		   | "true" | "yes" -> true
 		   | "false" | "no" -> false
 		   | _ as error ->
-		      raise (ExceptionDefn.Semantics_Error
-			       (pos_v,Printf.sprintf "Value %s should be either \"yes\" or \"no\"" error))
+		      raise (ExceptionDefn.Malformed_Decl
+			       ("Value "^error^" should be either \"yes\" or \"no\"", pos_v))
 		  ) Parameter.dumpIfDeadlocked
      | "plotSepChar" ->
 	set_value pos_p param value_list
-		  (fun (v,p) ->
+		  (fun v _ ->
 		   fun f ->  Format.fprintf f "%s" v
 		  ) Parameter.plotSepChar
      | "maxConsecutiveClash" ->
 	set_value pos_p param value_list
-		  (fun (v,p) ->
+		  (fun v p ->
 		   try int_of_string v
 		   with _ ->
-		     raise (ExceptionDefn.Semantics_Error
-			      (p,Printf.sprintf "Value %s should be an integer" v))
+		     raise (ExceptionDefn.Malformed_Decl
+			      ("Value "^v^" should be an integer",p))
 		  ) Parameter.maxConsecutiveClash
 
      | "dotSnapshots" ->
 	set_value pos_p param value_list
-		  (fun (value,pos_v) ->
+		  (fun value pos_v ->
 		   match value with
 		   | "true" | "yes" -> true
 		   | "false" | "no" -> false
 		   | _ as error ->
-		      raise (ExceptionDefn.Semantics_Error
-			       (pos_v,Printf.sprintf "Value %s should be either \"yes\" or \"no\"" error))
+		      raise (ExceptionDefn.Malformed_Decl
+			       ("Value "^error^" should be either \"yes\" or \"no\"", pos_v))
 		  ) Parameter.dotOutput
      | "colorDot" ->
 	set_value pos_p param value_list
-		  (fun (value,pos_v) ->
+		  (fun value pos_v ->
 		   match value with
 		   | "true" | "yes" -> true
 		   | "false" | "no" -> false
 		   | _ as error ->
-		      raise (ExceptionDefn.Semantics_Error
-			       (pos_v,Printf.sprintf "Value %s should be either \"yes\" or \"no\"" error))
+		      raise (ExceptionDefn.Malformed_Decl
+			       ("Value "^error^" should be either \"yes\" or \"no\"", pos_v))
 		  ) Parameter.useColor
      | "dumpInfluenceMap" ->
-	set_value pos_p param value_list
-		  (fun (v,p) ->
-		   match v with
-		   | "true" | "yes" ->
-			       if !Parameter.influenceFileName = ""
-			       then "im.dot" else !Parameter.influenceFileName
-		   | "false" | "no" -> ""
-		   | _ as error ->
-		      raise (ExceptionDefn.Semantics_Error
-			       (p,Printf.sprintf "Value %s should be either \"yes\" or \"no\"" error))
-		  ) Parameter.influenceFileName
+	raw_set_value
+	  pos_p param value_list
+	  (fun v p ->
+	   match v with
+	   | "true" | "yes" -> Kappa_files.set_up_influence ()
+	   | "false" | "no" -> Kappa_files.set_influence ""
+	   | _ as error ->
+	      raise (ExceptionDefn.Malformed_Decl
+		       ("Value "^error^" should be either \"yes\" or \"no\"",p))
+	     )
      | "influenceMapFileName" ->
-	set_value pos_p param value_list fst Parameter.influenceFileName
+	raw_set_value pos_p param value_list
+		      (fun x _ -> Kappa_files.set_influence x)
      | "showIntroEvents" ->
 	set_value pos_p param value_list
-		  (fun (v,p) -> match v with
+		  (fun v p -> match v with
 				| "true" | "yes" -> true
 				| "false" | "no" -> false
 				| _ as error ->
-				   raise (ExceptionDefn.Semantics_Error
-					    (p,Printf.sprintf "Value %s should be either \"yes\" or \"no\"" error))
+				   raise (ExceptionDefn.Malformed_Decl
+					    ("Value "^error^" should be either \"yes\" or \"no\"",p))
 		  )
 		  Parameter.showIntroEvents
      | _ as error ->
-	raise (ExceptionDefn.Semantics_Error
-		 (pos_of_lex_pos (fst pos_p),Printf.sprintf "Unkown parameter %s" error))
+	raise (ExceptionDefn.Malformed_Decl ("Unkown parameter "^error, pos_p))
     ) result.configurations
 
-let initialize result counter =
-  Debug.tag "+ Compiling..." ;
-  Debug.tag "\t -simulation parameters" ;
+let initialize logger overwrite result =
+  Debug.tag logger "+ Compiling..." ;
+  Debug.tag logger "\t -simulation parameters" ;
   let _ = configurations_of_result result in
 
-  Debug.tag "\t -agent signatures" ;
-  let sigs_nd =
-    NamedDecls.create (array_map_of_list
-			 (fun (name,intf) -> (name,Signature.create intf))
-			 result.Ast.signatures) in
+  Debug.tag logger "\t -agent signatures" ;
+  let sigs_nd = Signature.create result.Ast.signatures in
   let tk_nd =
     NamedDecls.create (array_map_of_list (fun x -> (x,())) result.Ast.tokens) in
 
-  Debug.tag "\t -variable declarations";
-  let vars_nd = NamedDecls.create (Array.of_list result.Ast.variables) in
+  Debug.tag logger "\t -variable declarations";
+  let alg_vars_over =
+    Tools.list_rev_map_append
+      (fun (x,v) -> (Term.with_dummy_pos x,
+		     Term.with_dummy_pos (Ast.CONST v))) overwrite
+      (List.filter
+	 (fun ((x,_),_) ->
+	  List.for_all (fun (x',_) -> x <> x') overwrite)
+	 result.Ast.variables) in
+  let vars_nd = NamedDecls.create (Array.of_list alg_vars_over) in
   let (fresh_kappa,_ as mixs),alg_a =
     array_fold_left_mapi (fun i mixs ((label,_ as lbl_pos),ast) ->
 			  let (mixs',alg) =
@@ -967,36 +934,36 @@ let initialize result counter =
 
   let (env, kappa_vars) = variables_of_result env mixs alg_a in
 
-  Debug.tag "\t -initial conditions";
-  let sg,token_vector,env = init_graph_of_result env result in
+  Debug.tag logger "\t -initial conditions";
+  let sg,token_vector = init_graph_of_result env result in
 
-  let tolerate_new_state = !Parameter.implicitSignature in
-  Parameter.implicitSignature := false ;
-
-  Debug.tag "\t -rules";
+  Debug.tag logger "\t -rules";
   let (env, kappa_vars, pure_rules) =
-    rules_of_result env kappa_vars result tolerate_new_state in
+    rules_of_result env kappa_vars result in
 
-  Debug.tag "\t -observables";
+  Debug.tag logger "\t -observables";
   let env,kappa_vars,observables = obs_of_result env kappa_vars result in
-  Debug.tag "\t -perturbations" ;
+  Debug.tag logger "\t -perturbations" ;
   let (kappa_vars, pert, rules, env) =
     pert_of_result kappa_vars env pure_rules result in
-  Debug.tag "\t Done";
-  Debug.tag "+ Analyzing non local patterns..." ;
+  Debug.tag logger "\t Done";
+  Debug.tag logger "+ Analyzing non local patterns..." ;
   let env = Environment.init_roots_of_nl_rules env in
-  Debug.tag "+ Building initial simulation state...";
-  Debug.tag "\t -Counting initial local patterns..." ;
+  Debug.tag logger "+ Building initial simulation state...";
+  let counter =
+    Counter.create !Parameter.pointNumberValue
+		   0.0 0 !Parameter.maxTimeValue !Parameter.maxEventValue in
+  Debug.tag logger "\t -Counting initial local patterns..." ;
   let (state, env) =
-    State.initialize sg token_vector rules kappa_vars
+    State.initialize logger sg token_vector rules kappa_vars
 		     observables pert counter env
   in
   let state =
     if env.Environment.has_intra then
       begin
-	Debug.tag "\t -Counting initial non local patterns..." ;
+	Debug.tag logger "\t -Counting initial non local patterns..." ;
 	NonLocal.initialize_embeddings state counter env
       end
     else state
   in
-  (Debug.tag "\t Done"; (env, state))
+  (Debug.tag logger "\t Done"; (env, counter, state))

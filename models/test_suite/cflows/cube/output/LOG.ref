@@ -1,0 +1,64 @@
++ Command line is: 'KaSim' '-i' 'cube.ka' '-seed' '240056667' '-e' '30000' '-d' 'output'
+Parsing cube.ka...
+done
++ Initialized random number generator with seed 240056667
++ Compiling...
+	 -simulation parameters
+	 -agent signatures
+	 -variable declarations
+	 -initial conditions
+	 -rules
+	 -observables
+	 -perturbations
+	 Done
++ Analyzing non local patterns...
++ Building initial simulation state...
+	 -Counting initial local patterns...
+	 Done
+____________________________________________________________
+############################################################
++ Producing causal compressions
+	 - refining events
+	 - detecting siphons
+	 - cutting concurrent events
+	 - computing causal past of each observed events (5855)
+
+Stats:
+ number of step   : 45856
+ longest story    : 7
+ average length   : 2.35571050063
+ geometric mean   : 2.85604995333
+
+	 - causal & weak flow compression (5855)
+
+____________________________________________________________
+############################################################	 - detecting pseudo inverse events
+	 - computing causal past of each observed events (5855)
+
+____________________________________________________________
+############################################################
+Stats:
+ number of step   : 28069
+ longest story    : 7
+ average length   : 3.79385140905
+ geometric mean   : 4.11564260967
+
+	 - causal & weak flow compression (5855)
+
+____________________________________________________________
+############################################################
+
+
+
+
++ Pretty printing 2 flows
+
++ Pretty printing 1 weakly compressed flow
+
+Simulation ended (eff.: 0.991703, detail below)
+	Valid embedding but no longer unary when required: 0.000000
+	Valid embedding but not binary when required: 0.000000
+	Clashing instance: 0.000000
+	Lazy negative update: 1.000000
+	Lazy negative update of non local instances: 0.000000
+	Perturbation interrupting time advance: 0.000000

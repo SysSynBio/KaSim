@@ -1,40 +1,20 @@
-open Tools
 open Mods
-open Random_tree
 
 let version = "4.0-refactoring"
 
 let usage_msg =
   "KaSim "^version^":\n"^
-    "Usage is KaSim -i input_file [-e events | -t time] [-p points] [-o output_file]\n"
+    "Usage is KaSim [-i] input_file [-e events | -t time] [-p points] [-o output_file]\n"
 let version_msg = "Kappa Simulator: "^version^"\n"
 
-let checkFileExists () =
-  let check file =
-    match file with
-    | "" -> ()
-    | file ->
-       let file = Tools.kasim_path file in
-       if Sys.file_exists file then
-	 let () =
-	   Format.eprintf
-	     "File '%s' already exists do you want to erase (y/N)?@." file in
-	 let answer = Tools.read_input () in
-	 if answer<>"y" then exit 1
-  in
-  check !Parameter.influenceFileName ;
-  check !Parameter.fluxFileName ;
-  check !Parameter.marshalizedOutFile ;
-  if !Parameter.pointNumberValue > 0 then check !Parameter.outputDataName
-
 let close_desc opt_env =
-  List.iter (fun d -> close_out d) !Parameter.openOutDescriptors ;
+  let () = Kappa_files.close_all_out_desc () in
   List.iter (fun d -> close_in d) !Parameter.openInDescriptors ;
   match opt_env with
   | None -> ()
   | Some env -> Environment.close_desc env
 
-let main =
+let () =
   let options = [
     ("--version",
      Arg.Unit (fun () -> print_string (version_msg^"\n") ; flush stdout ; exit 0),
@@ -45,29 +25,35 @@ let main =
      "name of a kappa file to use as input (can be used multiple times for multiple input files)");
     ("-e",
      Arg.Int (fun i -> if i < 0 then Parameter.maxEventValue := None
-		       else Parameter.maxTimeValue:= None ;
-		       Parameter.maxEventValue := Some i),
+		       else let () = Parameter.maxTimeValue:= None in
+			    Parameter.maxEventValue := Some i),
      "Number of total simulation events, including null events (negative value for unbounded simulation)");
     ("-t",
      Arg.Float(fun t -> Parameter.maxTimeValue := Some t ;
 			Parameter.maxEventValue := None),
      "Max time of simulation (arbitrary time unit)");
-    ("-p", Arg.Int (fun i -> Parameter.pointNumberValue:= i),
+    ("-p", Arg.Set_int Parameter.pointNumberValue,
      "Number of points in plot");
-    ("-o", Arg.String (fun s -> Parameter.outputDataName:=s ),
+    ("-var",
+     Arg.Tuple
+       [Arg.Set_string Parameter.tmp_var_name;
+	Arg.String
+	  (fun var_val ->
+	   Parameter.alg_var_overwrite :=
+	     (!Parameter.tmp_var_name,
+	      try Nbr.of_string var_val with
+		Failure _ ->
+		raise (Arg.Bad ("\""^var_val^"\" is not a valid value")))
+	       ::!Parameter.alg_var_overwrite)],
+     "Set a variable to a given value");
+    ("-o", Arg.String Kappa_files.set_data,
      "file name for data output") ;
     ("-d",
-     Arg.String
-       (fun s ->
-	let () = try
-	    if not (Sys.is_directory s)
-	    then (Format.eprintf "'%s' is not a directory@." s ; exit 1)
-	  with Sys_error msg -> Tools.mk_dir_r s in
-	Parameter.outputDirName := s
-       ), "Specifies directory name where output file(s) should be stored") ;
-    ("-load-sim", Arg.String (fun file -> Parameter.marshalizedInFile := file),
+     Arg.String Kappa_files.set_dir,
+     "Specifies directory name where output file(s) should be stored") ;
+    ("-load-sim", Arg.Set_string Parameter.marshalizedInFile,
      "load simulation package instead of kappa files") ;
-    ("-make-sim", Arg.String (fun file -> Parameter.marshalizedOutFile := file),
+    ("-make-sim", Arg.String Kappa_files.set_marshalized,
      "save kappa files as a simulation package") ;
     ("--implicit-signature",
      Arg.Unit (fun () ->
@@ -76,18 +62,20 @@ let main =
      "Program will guess agent signatures automatically") ;
     ("-seed", Arg.Int (fun i -> Parameter.seedValue := Some i),
      "Seed for the random number generator") ;
-    ("--eclipse", Arg.Unit (fun () -> Parameter.eclipseMode:= true),
+    ("--eclipse", Arg.Set Parameter.eclipseMode,
      "enable this flag for running KaSim behind eclipse plugin") ;
-    ("--emacs-mode", Arg.Unit (fun () -> Parameter.emacsMode:= true),
+    ("--emacs-mode", Arg.Set Parameter.emacsMode,
      "enable this flag for running KaSim using emacs-mode") ;
-    ("--compile", Arg.Unit (fun _ -> Parameter.compileModeOn := true),
+    ("--compile", Arg.Set Parameter.compileModeOn,
      "Display rule compilation as action list") ;
-    ("--debug", Arg.Unit (fun () -> Parameter.debugModeOn:= true),
+    ("--debug", Arg.Set Parameter.debugModeOn,
      "Enable debug mode") ;
-    ("--safe", Arg.Unit (fun () -> Parameter.safeModeOn:= true),
+    ("--safe", Arg.Set Parameter.safeModeOn,
      "Enable safe mode") ;
-    ("--backtrace", Arg.Unit (fun () -> Parameter.backtrace:= true),
+    ("--backtrace", Arg.Set Parameter.backtrace,
      "Backtracing exceptions") ;
+    ("--batch", Arg.Set Parameter.batchmode,
+     "Set non interactive mode (always assume default answer)") ;
     ("--gluttony",
      Arg.Unit (fun () -> Gc.set { (Gc.get()) with
 				  Gc.space_overhead = 500 (*default 80*) } ;),
@@ -97,7 +85,11 @@ let main =
   ]
   in
   try
-    Arg.parse options (fun _ -> Arg.usage options usage_msg ; exit 1) usage_msg;
+    Arg.parse options
+	      (fun fic ->
+	       Parameter.inputKappaFileNames:=
+		 fic::(!Parameter.inputKappaFileNames))
+	      usage_msg;
     let abort =
       match !Parameter.inputKappaFileNames with
       | [] -> !Parameter.marshalizedInFile = ""
@@ -115,30 +107,38 @@ let main =
     Printexc.record_backtrace !Parameter.backtrace ; (*Possible backtrace*)
 
     (*let _ = Printexc.record_backtrace !Parameter.debugModeOn in*)
+
+    Format.printf "+ Command line is: @[<h>%a@]@."
+		  (Pp.array Pp.space
+			    (fun i f s ->
+			     Format.fprintf
+			       f "'%s'" (if i = 0 then "KaSim" else s)))
+		  Sys.argv;
+
     let result =
       Ast.init_compil() ;
-      List.iter (fun fic -> KappaLexer.compile fic)
+      List.iter (fun fic -> KappaLexer.compile Format.std_formatter fic)
 		!Parameter.inputKappaFileNames ;
       !Ast.result in
-    let () =
+
+    let theSeed =
       match !Parameter.seedValue with
-      | Some seed -> Random.init seed
+      | Some seed -> seed
       | None ->
 	 begin
 	   Format.printf "+ Self seeding...@." ;
 	   Random.self_init() ;
-	   let i = Random.bits () in
-	   Random.init i ;
-	   Format.printf
-	     "+ Initialized random number generator with seed %d@." i
+	   Random.bits ()
 	 end
     in
+    Random.init theSeed ;
+    Format.printf
+      "+ Initialized random number generator with seed %d@." theSeed;
 
-    let counter =
-      Counter.create 0.0 0 !Parameter.maxTimeValue !Parameter.maxEventValue in
-    let (env, state) =
+    let (env, counter, state) =
       match !Parameter.marshalizedInFile with
-      | "" -> Eval.initialize result counter
+      | "" ->
+	 Eval.initialize Format.std_formatter !Parameter.alg_var_overwrite result
       | marshalized_file ->
 	 try
 	   let d = open_in_bin marshalized_file in
@@ -150,49 +150,36 @@ let main =
 	     else
 	       Format.printf "+Loading simulation package %s...@."
 			     marshalized_file;
-	     let env,state = (Marshal.from_channel d : Environment.t * State.t) in
+	     let env,counter,state =
+	       (Marshal.from_channel d : Environment.t * Counter.t * State.t) in
 	     Pervasives.close_in d ;
 	     Format.printf "Done@." ;
-	     (env,state)
+	     (env,counter,state)
 	   end
 	 with
-	 | exn ->
-	    Debug.tag "!Simulation package seems to have been created with a different version of KaSim, aborting...";
+	 | _exn ->
+	    Debug.tag
+	      Format.std_formatter
+	      "!Simulation package seems to have been created with a different version of KaSim, aborting...";
 	    exit 1
     in
 
-    Parameter.setOutputName ();
-    checkFileExists() ;
+    Kappa_files.setCheckFileExists() ;
 
-    let () =
-      if !Parameter.pointNumberValue > 0 then
-	Plot.create !Parameter.outputDataName env state counter
-      else
-	ExceptionDefn.warning
-	  (fun f ->
-	   Format.fprintf
-	     f "No data points are required,@ use -p option for plotting data.")
-    in
+    let () = Plot.create (Kappa_files.get_data ()) in
+    let () = if !Parameter.pointNumberValue > 0 then
+	       Plot.plot_now env counter state in
 
-    let () =
-      match !Parameter.marshalizedOutFile with
-      | "" -> ()
-      | file ->
-	 let d = open_out_bin (kasim_path file) in
-	 begin
-	   Marshal.to_channel d (env,state) [Marshal.Closures] ;
-	   close_out d
-	 end
-    in
-    if !Parameter.influenceFileName <> ""  then
-      begin
-	let desc = Tools.kasim_open_out !Parameter.influenceFileName in
-	State.dot_of_influence_map (Format.formatter_of_out_channel desc) state env; 
-	close_out desc
-      end ;
-    if !Parameter.compileModeOn then (State.dump_rules Format.err_formatter state env; exit 0);
-    let profiling = Compression_main.D.S.PH.B.PB.CI.Po.K.P.init_log_info () in
-    let grid,profiling,event_list =
+    let () = Kappa_files.with_marshalized
+	       (fun d -> Marshal.to_channel
+			   d (env,counter,state) [Marshal.Closures]) in
+
+    Kappa_files.with_influence
+      (fun d -> State.dot_of_influence_map d state env);
+    if !Parameter.compileModeOn
+    then (State.dump_rules Format.err_formatter state env; exit 0);
+    let profiling = Compression_main.init_secret_log_info () in
+    let _grid,profiling,event_list =
       if Environment.tracking_enabled env then
 	let () =
 	  if !Parameter.mazCompression
@@ -208,100 +195,99 @@ let main =
 	let grid = Causal.empty_grid() in
         let event_list = [] in
         let profiling,event_list =
-          Compression_main.D.S.PH.B.PB.CI.Po.K.store_init profiling state event_list in 
+          Compression_main.secret_store_init profiling state event_list in
         grid,profiling,event_list
       else (Causal.empty_grid(),profiling,[])
     in
-    ExceptionDefn.flush_warning () ;
+    ExceptionDefn.flush_warning Format.err_formatter ;
     Parameter.initSimTime () ;
-    try
-      Run.loop state profiling event_list counter env ;
-      Format.print_newline() ;
-      Format.printf "Simulation ended";
-      if Counter.null_event counter = 0 then Format.print_newline()
-      else
-	let () =
-	  Format.printf " (eff.: %f, detail below)@."
-			((float_of_int (Counter.event counter)) /.
-			   (float_of_int
-			      (Counter.null_event counter + Counter.event counter))) in
-	Array.iteri
-	  (fun i n ->
-	   match i with
-	   | 0 ->
-	      Format.printf "\tValid embedding but no longer unary when required: %f@."
-			    ((float_of_int n) /. (float_of_int (Counter.null_event counter)))
-	   | 1 ->
-	      Format.printf "\tValid embedding but not binary when required: %f@."
-			    ((float_of_int n) /. (float_of_int (Counter.null_event counter)))
-	   | 2 ->
-	      Format.printf "\tClashing instance: %f@."
-			    ((float_of_int n) /. (float_of_int (Counter.null_event counter)))
-	   | 3 ->
-	      Format.printf "\tLazy negative update: %f@."
-			    ((float_of_int n) /. (float_of_int (Counter.null_event counter)))
-	   | 4 -> Format.printf "\tLazy negative update of non local instances: %f@."
-				((float_of_int n) /. (float_of_int (Counter.null_event counter)))
-	   | 5 -> Format.printf "\tPerturbation interrupting time advance: %f@."
-				((float_of_int n) /. (float_of_int (Counter.null_event counter)))
-	   |_ -> Format.printf "\tna@."
-	  ) counter.Counter.stat_null ;
+    let () =
+      try Run.loop Format.std_formatter state profiling event_list counter env
+      with
+      | ExceptionDefn.UserInterrupted f ->
+	 begin
+	   let () = Format.print_newline() in
+	   let msg = f (Counter.time counter) (Counter.event counter) in
+	   let () =
+	     Format.eprintf
+	       "@.***%s: would you like to record the current state? (y/N)***"
+	       msg in
+	   let () = close_desc (Some env) in
+	   (*closes all other opened descriptors*)
+	   if !Parameter.batchmode
+	   then raise (ExceptionDefn.UserInterrupted f)
+	   else
+	     match String.lowercase (Tools.read_input ()) with
+	     | ("y" | "yes") ->
+		let () =  Parameter.dotOutput := false in
+		Kappa_files.with_dump
+		  (fun desc ->
+		   State.snapshot
+		     state counter desc !Parameter.snapshotHighres env;
+		   Parameter.debugModeOn:=true;
+		   State.dump state counter env)
+	     | _ -> ()
+	 end
+      | ExceptionDefn.Deadlock ->
+	 Format.printf
+	   "?@.A deadlock was reached after %d events and %Es (Activity = %.5f)"
+	   (Counter.event counter) (Counter.time counter)
+	   (State.total_activity state) in
+    Format.print_newline() ;
+    Format.printf "Simulation ended";
+    if Counter.null_event counter = 0 then Format.print_newline()
+    else
+      let () =
+	Format.printf " (eff.: %f, detail below)@."
+		      ((float_of_int (Counter.event counter)) /.
+			 (float_of_int
+			    (Counter.null_event counter + Counter.event counter))) in
+      Array.iteri
+	(fun i n ->
+	 match i with
+	 | 0 ->
+	    Format.printf "\tValid embedding but no longer unary when required: %f@."
+			  ((float_of_int n) /. (float_of_int (Counter.null_event counter)))
+	 | 1 ->
+	    Format.printf "\tValid embedding but not binary when required: %f@."
+			  ((float_of_int n) /. (float_of_int (Counter.null_event counter)))
+	 | 2 ->
+	    Format.printf "\tClashing instance: %f@."
+			  ((float_of_int n) /. (float_of_int (Counter.null_event counter)))
+	 | 3 ->
+	    Format.printf "\tLazy negative update: %f@."
+			  ((float_of_int n) /. (float_of_int (Counter.null_event counter)))
+	 | 4 -> Format.printf "\tLazy negative update of non local instances: %f@."
+			      ((float_of_int n) /. (float_of_int (Counter.null_event counter)))
+	 | 5 -> Format.printf "\tPerturbation interrupting time advance: %f@."
+			      ((float_of_int n) /. (float_of_int (Counter.null_event counter)))
+	 |_ -> Format.printf "\tna@."
+	) counter.Counter.stat_null ;
       if !Parameter.fluxModeOn then
-	begin
-	  let d = kasim_open_out !Parameter.fluxFileName in
-	  State.dot_of_flux (Format.formatter_of_out_channel d) state env ;
-	  close_out d
-	end
-    with
-    | Invalid_argument msg ->
-       begin
-	 (*if !Parameter.debugModeOn then (Debug.tag "State dumped! (dump.ka)";
- let desc = kasim_open_out "dump.ka" in State.snapshot state counter desc env;
- close_out desc); *)
-	 let s = (* Printexc.get_backtrace() *) "" in
-	 Format.eprintf "@.***Runtime error %s***@,%s@." msg s ;
-	 exit 1
-       end
-    | ExceptionDefn.UserInterrupted f ->
-       begin
-	 flush stdout ;
-	 let msg = f (Counter.time counter) (Counter.event counter) in
-	 Format.eprintf
-	   "@.***%s: would you like to record the current state? (y/N)***@."
-	   msg;
-	 (match String.lowercase (Tools.read_input ()) with
-	  | ("y" | "yes") ->
-	     begin
-	       Parameter.dotOutput := false ;
-	       let desc = kasim_open_out !Parameter.dumpFileName in
-	       State.snapshot state counter desc !Parameter.snapshotHighres env;
-	       Parameter.debugModeOn:=true ; State.dump state counter env ;
-	       close_out desc ;
-	       Format.eprintf "Final state dumped (%s)@." !Parameter.dumpFileName
-	     end
-	  | _ -> ()
-	 ) ;
-	 close_desc (Some env) (*closes all other opened descriptors*)
-       end
-    | ExceptionDefn.Deadlock ->
-       Format.printf
-	 "?@.A deadlock was reached after %d events and %Es (Activity = %.5f)@."
-	 (Counter.event counter) (Counter.time counter)
-	 (State.total_activity state)
+	Kappa_files.with_flux "" (fun d -> State.dot_of_flux d state env)
   with
-  | ExceptionDefn.Semantics_Error (pos, msg) ->
-     (close_desc None;
-      Format.eprintf "***Error (%s) line %d, char %d: %s***@."
-		     (fn pos) (ln pos) (cn pos) msg)
-  | ExceptionDefn.Malformed_Decl er -> Pp.error Format.pp_print_string er
+  | ExceptionDefn.Malformed_Decl er ->
+     let () = close_desc None in
+     let () = Pp.error Format.pp_print_string er in
+     exit 2
+  | ExceptionDefn.Internal_Error er ->
+     let () = close_desc None in
+     let () =
+       Pp.error
+	 (fun f x -> Format.fprintf f "Internal Error (please report):@ %s" x)
+	 er in
+     exit 2
   | Invalid_argument msg ->
-     (close_desc None;
-      let s = "" (*Printexc.get_backtrace()*) in
-      Format.eprintf "@.@[<v>***Runtime error %s***@,%s@]@." msg s)
+     let () = close_desc None in
+     let s = "" (*Printexc.get_backtrace()*) in
+     let () = Format.eprintf "@.@[<v>***Runtime error %s***@,%s@]@." msg s in
+    exit 2
   | ExceptionDefn.UserInterrupted f ->
+     let () = close_desc None in
      let msg = f 0. 0 in
      let () =Format.eprintf "@.***Interrupted by user: %s***@." msg in
-     close_desc None
-  | ExceptionDefn.StopReached msg ->
-     (Format.eprintf "@.***%s***@." msg ; close_desc None)
-  | Sys_error msg -> (close_desc None; Format.eprintf "%s@." msg)
+     exit 2
+  | Sys_error msg ->
+     let () = close_desc None in
+     let () = Format.eprintf "%s@." msg in
+     exit 2

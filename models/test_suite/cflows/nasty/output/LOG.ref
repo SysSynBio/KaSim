@@ -1,0 +1,52 @@
++ Command line is: 'KaSim' 'nasty.ka' '-seed' '924556145' '-e' '100' '-d' 'output' '-p' '50'
+Parsing nasty.ka...
+done
++ Initialized random number generator with seed 924556145
++ Compiling...
+	 -simulation parameters
+	 -agent signatures
+	 -variable declarations
+	 -initial conditions
+	 -rules
+	 -observables
+	 -perturbations
+	 Done
++ Analyzing non local patterns...
++ Building initial simulation state...
+	 -Counting initial local patterns...
+	 Done
+____________________________________________________________
+############################################################
++ Producing causal compressions
+	 - refining events
+	 - detecting siphons
+	 - cutting concurrent events
+	 - detecting pseudo inverse events
+	 - computing causal past of each observed events (1)
+
+Stats:
+ number of step   : 8
+ longest story    : 6
+ average length   : 6.
+ geometric mean   : 6.
+
+	 - causal & weak flow compression (1)
+
+____________________________________________________________
+############################################################
+
+
+
+	 - strong flow compression (1)
+
+____________________________________________________________
+############################################################
++ Pretty printing 1 strongly compressed flow
+
+Simulation ended (eff.: 0.653595, detail below)
+	Valid embedding but no longer unary when required: 0.000000
+	Valid embedding but not binary when required: 0.000000
+	Clashing instance: 0.000000
+	Lazy negative update: 1.000000
+	Lazy negative update of non local instances: 0.000000
+	Perturbation interrupting time advance: 0.000000

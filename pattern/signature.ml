@@ -1,15 +1,16 @@
-open Mods
-open ExceptionDefn
-
 type t = ((unit NamedDecls.t) option) NamedDecls.t
 
 let fold f sign cont =
-  let cont,_ = Array.fold_left (fun (cont,i) _ -> (f i cont,i+1)) (cont,0)
-			      sign.NamedDecls.decls
+  let cont,_ = Array.fold_left
+		 (fun (cont,i) ((na,_),_) -> (f i na cont,i+1)) (cont,0)
+		 sign.NamedDecls.decls
   in cont
 
-let num_of_site site_name sign =
-  StringMap.find site_name sign.NamedDecls.finder
+let num_of_site ?agent_name site_name sign =
+  let kind = match agent_name with
+    | None -> "site name"
+    | Some agent_name -> "site name for agent "^agent_name
+  in NamedDecls.elt_id ~kind sign site_name
 
 let site_of_num addr sign =
   try NamedDecls.elt_name sign addr
@@ -17,10 +18,11 @@ let site_of_num addr sign =
 
 let num_of_internal_state site_id state sign =
   try
-    let _,values_opt = sign.NamedDecls.decls.(site_id) in
+    let (na,_),values_opt = sign.NamedDecls.decls.(site_id) in
     match values_opt with
     | None -> raise Not_found
-    | Some nd -> StringMap.find state nd.NamedDecls.finder
+    | Some nd ->
+       NamedDecls.elt_id ~kind:("internal state for site "^na) nd state
   with
   | Invalid_argument _ -> raise Not_found
 
@@ -33,28 +35,7 @@ let internal_state_of_num site_num val_num sign =
   with
   | Invalid_argument _ -> raise Not_found
 
-let internal_states_number site_num sign =
-  try
-    let _,values_opt = sign.NamedDecls.decls.(site_num) in
-    match values_opt with
-    | None -> 0
-    | Some nd -> NamedDecls.size nd
-  with
-  | Invalid_argument _ -> raise Not_found
-
-let arity sign = NamedDecls.size sign
-
-let default_num_value num_site sign =
-  try
-    let _,values_opt = sign.NamedDecls.decls.(num_site) in
-    match values_opt with
-    | None -> None
-    | Some _ -> Some 0
-  with
-  | Invalid_argument _ ->
-     invalid_arg "Signature.default_num_value: invalid site identifier"
-
-let create ast_intf =
+let create_t ast_intf =
   NamedDecls.create (
     Tools.array_map_of_list
       (fun p ->
@@ -67,7 +48,8 @@ let create ast_intf =
 	      Some (NamedDecls.create
 		      (Tools.array_map_of_list (fun x -> (x,())) l))
 	  )
-       | (_, pos) ->
+       | ((Ast.LNK_SOME | Ast.LNK_ANY |
+	   Ast.LNK_TYPE _ | Ast.LNK_VALUE _), pos) ->
 	  raise (ExceptionDefn.Malformed_Decl
 		("Link status inside a definition of signature", pos))
       ) ({Ast.port_nme =Term.with_dummy_pos "_";
@@ -75,19 +57,78 @@ let create ast_intf =
 	  Ast.port_lnk =Term.with_dummy_pos Ast.FREE;}
 	 :: ast_intf))
 
-let to_string sign =
-  let str_of_assoc assoc =
-    let cont = ref [] in
-    Array.iteri (fun i ((name,_),_) ->
-		 if name = "_" then ()
-		 else
-		   let int =
-		     match default_num_value i sign with
-		     | None -> ""
-		     | Some n ->  "~"^(internal_state_of_num i n sign)
-		   in
-		   cont:=(name^int)::!cont
-		) assoc ;
-    String.concat "," (List.rev !cont)
-  in
-  Printf.sprintf "(%s)"	(str_of_assoc sign.NamedDecls.decls)
+let print f sign =
+  Format.fprintf
+    f "(%a)"
+    (Pp.array
+       (fun f -> Format.pp_print_string f ",")
+       (fun i f ((name,_),_) ->
+	if name = "_" then ()
+	else
+	  let int =
+	    match sign.NamedDecls.decls.(i) with
+	    | _, None -> ""
+	    | _, Some _ ->  "~"^(internal_state_of_num i 0 sign)
+	  in
+	  Format.fprintf f "%s%s" name int))
+    sign.NamedDecls.decls
+
+type s = t NamedDecls.t
+
+let size sigs = NamedDecls.size sigs
+let get sigs agent_id = snd sigs.NamedDecls.decls.(agent_id)
+let arity sigs agent_id = NamedDecls.size (get sigs agent_id)
+
+let agent_of_num i sigs = NamedDecls.elt_name sigs i
+let num_of_agent name sigs =
+  NamedDecls.elt_id ~kind:"agent" sigs name
+
+let id_of_site (agent_name,_ as agent_ty) site_name sigs =
+  let n = num_of_agent agent_ty sigs in
+  num_of_site ~agent_name site_name (get sigs n)
+
+let site_of_id agent_id site_id sigs =
+  site_of_num site_id (get sigs agent_id)
+
+let id_of_internal_state (agent_name,_ as agent_ty) site_name state sigs =
+  let n = num_of_agent agent_ty sigs in
+  let sign = get sigs n in
+  let site_id =
+    num_of_site ~agent_name site_name sign in
+  num_of_internal_state site_id state sign
+
+let internal_state_of_id agent_id id_site id_state sigs =
+  internal_state_of_num id_site id_state (get sigs agent_id)
+
+let internal_states_number agent_id site_num sigs =
+  try
+    let _,values_opt = (get sigs agent_id).NamedDecls.decls.(site_num) in
+    match values_opt with
+    | None -> 0
+    | Some nd -> NamedDecls.size nd
+  with
+  | Invalid_argument _ -> raise Not_found
+
+let default_internal_state agent_id site_id sigs =
+  try
+    match (get sigs agent_id).NamedDecls.decls.(site_id) with
+    | _, None -> None
+    | _, Some _ -> Some 0
+  with
+  | Invalid_argument _ ->
+     invalid_arg "Signature.default_num_value: invalid site identifier"
+
+let create l =
+  NamedDecls.create (Tools.array_map_of_list
+		       (fun (name,intf) -> (name,create_t intf))
+		       l)
+
+let print_agent sigs f ag_ty =
+ Format.pp_print_string f @@ agent_of_num ag_ty sigs
+let print_site sigs ag_ty f id =
+ Format.pp_print_string f @@ site_of_id ag_ty id sigs
+let print_site_internal_state sigs ag_ty site f = function
+  | None -> print_site sigs ag_ty f site
+  | Some id ->
+     Format.fprintf f "%s~%s" (site_of_id ag_ty site sigs)
+		    (internal_state_of_id ag_ty site id sigs)

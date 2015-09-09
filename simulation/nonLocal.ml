@@ -2,13 +2,12 @@
 open Mods
 open Graph
 open State
-open Tools
-open Dynamics
 open ExceptionDefn
 
 (**updating non local mixtures after application of a linking rule using embedding [embedding_info]*)
 let update_intra_in_components r embedding_info state counter env =
-	if !Parameter.debugModeOn then Debug.tag "Looking for side effect update of non local rules..." ;
+  let () =
+    Debug.tag_if_debug "Looking for side effect update of non local rules..." in
 	let components = 
 		match embedding_info.Embedding.components with
 			| Some map -> map
@@ -24,35 +23,36 @@ let update_intra_in_components r embedding_info state counter env =
 	in
 	
 	let search_elements graph component extensions env =
-		let ext,modified = 
-			IntSet.fold
-			(fun u_id (extensions,modified) ->
-				if !Parameter.debugModeOn then (Printf.printf "looking for a piece of intra on lifts of node %d\n" u_id) ;
-				let u = try SiteGraph.node_of_id graph u_id with Not_found -> invalid_arg "NonLocal.search_elements"
-				in
-				let _,lifts = Node.get_lifts u 0 in (*BUG here site 0 is not always "_"*)
-				(if !Parameter.safeModeOn then let str = Environment.site_of_id (Node.name u) 0 env in if str <> "_" then failwith "Invariant violation in NonLocal.search_element") ;
-				LiftSet.fold
-				(fun inj (extensions,modified) ->
-					if Injection.is_trashed inj then (extensions,modified) (*injection should not be already invalid...*)
-					else
-						let (mix_id,cc_id) = Injection.get_coordinate inj in
-						
-						if not (Environment.is_nl_rule mix_id env) then 
-							begin
-								if !Parameter.debugModeOn then Printf.printf "a lift points to rule %d but it is a local one\n" mix_id ;
-								(extensions,modified)
-							end
-						else
-							let inj_map = try IntMap.find mix_id extensions with Not_found -> IntMap.empty in
-							let inj_list = try IntMap.find cc_id inj_map with Not_found -> [] in
-							let inj_map' = IntMap.add cc_id (inj::inj_list) inj_map in
-							(IntMap.add mix_id inj_map' extensions,true)
-				) lifts (extensions,modified)
-			) component (extensions,false)
-		in
-		if modified then (Some ext)
-		else None
+	  let ext,modified =
+	    IntSet.fold
+	      (fun u_id (extensions,modified) ->
+	       Debug.tag_if_debug "looking for a piece of intra on lifts of node %d" u_id ;
+	    let u = try SiteGraph.node_of_id graph u_id
+		    with Not_found -> invalid_arg "NonLocal.search_elements" in
+	    let _,lifts = Node.get_lifts u 0 in (*BUG here site 0 is not always "_"*)
+	    LiftSet.fold
+	      (fun inj (extensions,modified) ->
+	       if Injection.is_trashed inj
+	       then (extensions,modified) (*injection should not be already invalid...*)
+	       else
+		 let (mix_id,cc_id) = Injection.get_coordinate inj in
+		 if not (Environment.is_nl_rule mix_id env) then
+		   begin
+		     Debug.tag_if_debug "a lift points to rule %d but it is a local one" mix_id ;
+		     (extensions,modified)
+		   end
+		 else
+		   let inj_map = try IntMap.find mix_id extensions
+				 with Not_found -> IntMap.empty in
+		   let inj_list = try IntMap.find cc_id inj_map
+				  with Not_found -> [] in
+		   let inj_map' = IntMap.add cc_id (inj::inj_list) inj_map in
+		   (IntMap.add mix_id inj_map' extensions,true)
+	      ) lifts (extensions,modified)
+	      ) component (extensions,false)
+	  in
+	  if modified then (Some ext)
+	  else None
 	in
 	
 	(*reusing components that were computed to check that the rule was indeed binary*)
@@ -70,9 +70,11 @@ let update_intra_in_components r embedding_info state counter env =
 				let root = 
 					match Mixture.root_of_cc r.Primitives.lhs cc_i with Some r -> IntMap.find r embedding_info.Embedding.map | None -> invalid_arg "State.nl_positive_update" 
 				in
-				let _ = 
-					if !Parameter.debugModeOn then Debug.tag (Printf.sprintf "Exploring into image of CC[%d] computed during rule %d application" cc_i r.Primitives.r_id)
-	 			in
+				let () =
+				  Debug.tag_if_debug
+				    "Exploring into image of CC[%d] computed during rule %d application"
+				    cc_i r.Primitives.r_id
+				in
 				let component_i =
 				  try IntMap.find root components
 				  with Not_found ->
@@ -92,12 +94,15 @@ let update_intra_in_components r embedding_info state counter env =
 			) cc_set (extensions,found) 
 		) con_map (IntMap.empty,0)
 	in
-	if found < 2 then 
-		(if !Parameter.debugModeOn then Debug.tag "Potential new intras are not shared between merged cc and cannot be new, skipping"; state)
+	if found < 2 then
+	  let () =
+	    Debug.tag_if_debug
+	      "Potential new intras are not shared between merged cc and cannot be new, skipping" in
+	  state
 	else
 		IntMap.fold 
 		(fun r_id cc_map state ->
-			if !Parameter.debugModeOn then Debug.tag (Printf.sprintf "Trying to find intra(s) for rule [%d]" r_id) ;
+		 Debug.tag_if_debug "Trying to find intra(s) for rule [%d]" r_id;
 			
 			let lhs = kappa_of_id r_id state in
 			try
@@ -122,8 +127,11 @@ let update_intra_in_components r embedding_info state counter env =
 					) cc_map ([IntMap.empty],0)
 				in
 				
-				if cc <> Mixture.arity lhs then 
-					(if !Parameter.debugModeOn then Debug.tag (Printf.sprintf "One CC of rule [%d] has no candidate for intra, aborting" r_id); state)
+				if cc <> Mixture.arity lhs then
+				  let () =
+				    Debug.tag_if_debug
+				      "One CC of rule [%d] has no candidate for intra, aborting"
+				      r_id in state
 				else
 					List.fold_left  (*nl_injections : (InjProdHeap.t option) array*)
 					(fun state injprod_map -> 
@@ -145,7 +153,9 @@ let update_intra_in_components r embedding_info state counter env =
 					) state intras_for_r_id
 		with 
 		| Break cc_id ->
-			 (if !Parameter.debugModeOn then Debug.tag (Printf.sprintf "CC[%d] of rule [%d] has no candidate for intra, aborting" cc_id r_id); state)
+		   Debug.tag_if_debug
+		     "CC[%d] of rule [%d] has no candidate for intra, aborting" cc_id r_id;
+		   state
 		) extensions state
 		
 (**[update_rooted_intras injection_list state counter env] tries to form new intras using injections in [injection_list] as one component*)
@@ -156,7 +166,7 @@ let rec update_rooted_intras new_injs state counter env =
 			let (mix_id,cc_id) = Injection.get_coordinate injection in (*mix_id is the id of a non local lhs by invariant*)
 			
 			(*one should look into cc(root_injection) whether some nodes have a lift to (mix_id,cc_id') with cc_id <> cc_id'*)
-			let (a_0,u_0) = match Injection.root_image injection with None -> invalid_arg "NonLocal.complete_injections" | Some p -> p
+			let u_0 = match Injection.root_image injection with None -> invalid_arg "NonLocal.complete_injections" | Some (_,p) -> p
 			in
 			(*if activity of mix_id is null then there can be no intra*)
 			if not (is_complete mix_id state) then update_rooted_intras tl state counter env
@@ -168,7 +178,7 @@ let rec update_rooted_intras new_injs state counter env =
 						let _,liftset = Node.get_lifts node 0 in
 						LiftSet.exists (fun inj -> let (mix_id',cc_id') = Injection.get_coordinate inj in (mix_id' = mix_id) && (cc_id <> cc_id') ) liftset
 				in   
-				let (_,d_map,components,_) = SiteGraph.neighborhood ~filter_elements:predicate (get_graph state) u_0 (-1) in
+				let (_,_,components,_) = SiteGraph.neighborhood ~filter_elements:predicate (get_graph state) u_0 (-1) in
 				
 				(*components contains nodes whose name is the root of at least one complemetary injection*)
 				let candidate_map = 
@@ -236,7 +246,7 @@ let rec update_rooted_intras new_injs state counter env =
 							else
 								let injprod = match InjProdHeap.next_alloc injprod_hp with None -> InjProduct.create (Mixture.arity mix) mix_id | Some ip -> ip 
 								in
-								let injprod,new_roots = 
+								let injprod,_new_roots = 
 									IntMap.fold 
 									(fun cc_id inj (injprod,new_roots) ->
 										let root = (function Some (_,j) -> j | None -> invalid_arg "") (Injection.root_image inj) in
@@ -260,7 +270,7 @@ let rec update_rooted_intras new_injs state counter env =
 								let injprod_hp = InjProdHeap.alloc ~check:true injprod injprod_hp in
 									injprod_hp
 								with InjProdHeap.Is_present -> 
-									if !Parameter.debugModeOn then Debug.tag "Intra already added, skipping" ;
+									Debug.tag_if_debug "Intra already added, skipping" ;
 									injprod_hp 
 						) injprod_hp new_intras
 					in
@@ -270,7 +280,7 @@ let rec update_rooted_intras new_injs state counter env =
 
 let initialize_embeddings state counter env = 
 	SiteGraph.fold 
-	(fun id u state ->
+	(fun _id u state ->
 		let name = Node.name u in
 		if Environment.is_nl_root name env then (*node is potentially the root of an intra rule*) 
 		let _,lifts = Node.get_lifts u 0 in
@@ -296,31 +306,27 @@ let positive_update r embedding_t new_injs state counter env =
 	(*If rule is potentially breaking up some connected component this should wake up silenced rules*)
 	begin
 		match r.Primitives.cc_impact with
-			| None -> (if !Parameter.debugModeOn then Debug.tag "Rule cannot decrease connectedness no need to update silenced rules") 
+			| None -> Debug.tag_if_debug "Rule cannot decrease connectedness no need to update silenced rules"
 			| Some _ -> (*should be more precise here*) State.unsilence_rule state r counter env
 	end ;
 		
 	(*If rule is potentially merging two connected components this should trigger a positive update of non local rules*)
 	begin
-		match r.Primitives.cc_impact with
-			| None -> 
-				(if !Parameter.debugModeOn then 
-					Debug.tag "No possible side effect update of unary rules because applied rule cannot increase connectedness" ;
-				state
-				)
-			| Some (con_map,_,_) ->
-				if IntMap.is_empty con_map then state
-				else
-					begin
-						match embedding_t with
-							| Embedding.CONNEX _ -> 
-								(if !Parameter.debugModeOn then 
-									Debug.tag "No possible side effect update of unary rules because a unary instance was applied"; 
-								state
-								)
-							| Embedding.DISJOINT e | Embedding.AMBIGUOUS e -> (*one may need to compute connected components if they are not present in e, as in the AMBIGUOUS case*)
-								update_intra_in_components r e state counter env 
-					end
-	end 
-	
-	
+	  match r.Primitives.cc_impact with
+	  | None ->
+	     let () = Debug.tag_if_debug
+			"No possible side effect update of unary rules because applied rule cannot increase connectedness" in
+	     state
+	  | Some (con_map,_,_) ->
+	     if IntMap.is_empty con_map then state
+	     else
+	       begin
+		 match embedding_t with
+		 | Embedding.CONNEX _ ->
+		    let () = Debug.tag_if_debug
+			       "No possible side effect update of unary rules because a unary instance was applied" in
+		    state
+		 | Embedding.DISJOINT e | Embedding.AMBIGUOUS e -> (*one may need to compute connected components if they are not present in e, as in the AMBIGUOUS case*)
+					   update_intra_in_components r e state counter env
+	       end
+	end

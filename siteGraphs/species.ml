@@ -9,18 +9,6 @@ type table = (int list, (t * int) list) Hashtbl.t
 
 let empty_table () = Hashtbl.create 10
 
-let to_string spec env =
-	let hsh_lnk = Hashtbl.create 0
-	in
-	let _, l =
-		IntMap.fold
-			(fun id node (fresh, cont) ->
-						let (str, c) = Node.to_string false (hsh_lnk, fresh) node env in
-						(c, str:: cont)
-			) spec.nodes (0,[])
-	in
-	String.concat "," (List.rev l)
-
 let print env desc spec =
   let hsh_lnk = Hashtbl.create 0 in
   let mx = IntMap.size spec.nodes in
@@ -72,13 +60,9 @@ let to_dot hr palette k cpt spec desc env =
 		 with Not_found -> invalid_arg "Species.to_dot: Node not found"
 	       in
 	       let int_opt'= Node.internal_state (node',k) in
-	       let nme node_name site_id = function
-		 | Some int ->
-		    let str = Environment.state_of_id node_name site_id int env
-		    in
-		    let n = Environment.site_of_id node_name site_id env in
-		    (n^"~"^str)
-		 | None -> Environment.site_of_id node_name site_id env
+	       let nme node_name site_id int =
+		 Format.asprintf
+		   "%a" (Environment.print_site_state env node_name site_id) int
 	       in
 	       (i,nme (Node.name node) site_id int_opt,
 		j,nme (Node.name node') k int_opt')::cont
@@ -103,42 +87,49 @@ let to_dot hr palette k cpt spec desc env =
 (**[of_node sg root visited env] produces the species anchored at node [root] allocated in the graph [sg] and *)
 (** returns a pair [(spec,visited')] where [visited'=visited U node_id] of [spec]*)
 let of_node sg root visited env =
-	let rec iter todo spec visited =
-		match todo with
-		| [] -> (spec, visited)
-		| id:: tl ->
-				let node = 
-					try SiteGraph.node_of_id sg id with 
-						| Not_found -> invalid_arg (Printf.sprintf "Species.of_node: Node %d is no longer in the graph" id) in
-				let todo', spec'=
-					Node.fold_status
-						(fun site_id (_, lnk_state) (todo, spec) ->
-								match lnk_state with
-								| Node.Null -> (todo, spec)
-								| Node.Ptr (node', site_id') ->
-										let id' = Node.get_address node' in
-										if IntMap.mem id' spec.nodes then (todo, spec)
-										else
-											let view = Node.bit_encode node' env in
-											let set =
-												try IntSet.add id' (Int64Map.find view spec.views) with
-												| Not_found -> IntSet.singleton id'
-											in
-											(id':: todo,
-												{ nodes = IntMap.add id' (Node.marshalize node') spec.nodes ;
-													views = Int64Map.add view set spec.views }
-											)
-								| Node.FPtr _ -> invalid_arg "Species.of_node"
-						) node (tl, spec)
-				in
-				iter todo' spec' (IntSet.add id visited)
-	in
-	let view_root = Node.bit_encode root env in
-	iter [Node.get_address root]
-	{ nodes = IntMap.add (Node.get_address root) (Node.marshalize root) IntMap.empty ;
-		views = Int64Map.add view_root (IntSet.singleton (Node.get_address root)) Int64Map.empty ;
-	} visited 
-	
+  let rec iter todo spec visited =
+    match todo with
+    | [] -> (spec, visited)
+    | id:: tl ->
+       let node =
+	 try SiteGraph.node_of_id sg id
+	 with Not_found ->
+	   invalid_arg
+	     (Format.sprintf
+		"Species.of_node: Node %d is no longer in the graph" id) in
+       let todo', spec'=
+	 Node.fold_status
+	   (fun site_id (_, lnk_state) (todo, spec) ->
+	    match lnk_state with
+	    | Node.Null -> (todo, spec)
+	    | Node.Ptr (node', site_id') ->
+	       let id' = Node.get_address node' in
+	       if IntMap.mem id' spec.nodes then (todo, spec)
+	       else
+		 let view = Node.bit_encode node' env in
+		 let set =
+		   try IntSet.add id' (Int64Map.find view spec.views) with
+		   | Not_found -> IntSet.singleton id'
+		 in
+		 (id':: todo,
+		  { nodes = IntMap.add id' (Node.marshalize node') spec.nodes ;
+		    views = Int64Map.add view set spec.views }
+		 )
+	    | Node.FPtr _ -> invalid_arg "Species.of_node"
+	   ) node (tl, spec)
+       in
+       iter todo' spec' (IntSet.add id visited)
+  in
+  let view_root = Node.bit_encode root env in
+  iter [Node.get_address root]
+       { nodes =
+	   IntMap.add (Node.get_address root) (Node.marshalize root)
+		      IntMap.empty ;
+	 views =
+	   Int64Map.add view_root (IntSet.singleton (Node.get_address root))
+			Int64Map.empty ;
+       } visited
+
 let iso spec1 spec2 env =
 	
 	let check i i' assoc = 
@@ -258,21 +249,21 @@ let dump desc table hr token_vector env =
     ) token_vector ;
   Format.fprintf desc "@]}@."
 
-let dump_table table env =
-  let () = Format.open_vbox 0 in
+let dump_table f table env =
+  let () = Format.pp_open_vbox f 0 in
   let () =
     Hashtbl.iter
       (fun () specs ->
        List.iter
 	 (fun (spec, k) ->
-	  Format.printf "%d instances of species: %s@," k (to_string spec env);
-	  Format.printf
-	    "with signature %a@,"
+	  Format.fprintf f "%d instances of species: %a@," k (print env) spec;
+	  Format.fprintf
+	    f "with signature %a@,"
 	    (Pp.set Int64Map.bindings Pp.comma
 		    (fun f (i,_) -> Format.fprintf f "%Ld" i))
 	    spec.views;
-	  Printf.printf "******@,"
+	  Format.fprintf f "******@,"
 	 ) specs
       ) table in
-  let () = Format.close_box () in
-  Format.print_newline ()
+  let () = Format.pp_close_box f () in
+  Format.pp_print_newline f ()
